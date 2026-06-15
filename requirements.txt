@@ -1,0 +1,45 @@
+absl-py==2.4.0
+addict==2.4.0
+basicsr==1.4.2
+brotlicffi @ file:///opt/miniconda3/conda-bld/brotlicffi_1764961161728/work
+certifi @ file:///Users/ec2-user/croot/certifi_1779370298625/work/certifi
+cffi @ file:///opt/miniconda3/conda-bld/cffi_1761832772717/work
+charset-normalizer @ file:///opt/miniconda3/conda-bld/charset-normalizer_1761744841364/work
+filelock @ file:///Users/ec2-user/croot/filelock_1769440497507/work
+fsspec==2026.4.0
+future==1.0.0
+gmpy2 @ file:///opt/miniconda3/conda-bld/gmpy2_1764747893574/work
+grpcio==1.81.1
+idna @ file:///Users/ec2-user/croot/idna_1780561399149/work
+ImageIO==2.37.3
+Jinja2 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_2cnn4kenrm/croot/jinja2_1741710859444/work
+lazy-loader==0.5
+lmdb==2.2.1
+Markdown==3.10.2
+MarkupSafe @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_1f_uj4vxik/croot/markupsafe_1738584045311/work
+mpmath @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_17iu6a8a3m/croot/mpmath_1690848269369/work
+networkx @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_e6lt1dcyid/croot/networkx_1737040482044/work
+numpy==1.26.4
+opencv-python==4.13.0.92
+packaging==26.0
+pillow @ file:///Users/ec2-user/croot/pillow_1780988597856/work
+platformdirs==4.10.0
+protobuf==7.35.1
+pycparser @ file:///Users/ec2-user/croot/pycparser_1774959675136/work
+PySocks @ file:///opt/miniconda3/conda-bld/pysocks_1761753011241/work
+PyYAML @ file:///opt/miniconda3/conda-bld/pyyaml_1763465492983/work
+requests @ file:///Users/ec2-user/croot/requests_1780348925134/work
+scikit-image==0.25.2
+scipy==1.15.3
+sympy==1.13.1
+tb-nightly==2.21.0a20251023
+tensorboard-data-server==0.7.2
+tifffile==2025.5.10
+tomli==2.4.1
+torch==2.1.0
+torchvision==0.16.0
+tqdm==4.68.2
+typing_extensions @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_dffmcwqo6o/croot/typing_extensions_1756281471323/work
+urllib3 @ file:///Users/ec2-user/croot/urllib3_1778536191500/work
+Werkzeug==3.1.8
+yapf==0.43.0
