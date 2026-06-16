@@ -3,11 +3,13 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from pathlib import Path
+import sys
 
 from models.edsr import EDSR
 from models.hat import HAT
 from src.dataset import get_dataloader
 
+sys.path.append(str(Path(__file__).parent.parent))
 
 def get_model(model_name: str):
     if model_name == "edsr":
