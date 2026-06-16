@@ -1,29 +1,25 @@
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+
 import argparse
 import torch
 import torch.nn as nn
 from torch.optim import Adam
-from pathlib import Path
-import sys
 
 from models.edsr import EDSR
 from models.hat import HAT
 from src.dataset import get_dataloader
 
-sys.path.append(str(Path(__file__).parent.parent))
-
-def get_model(model_name: str):
-    if model_name == "edsr":
-        return EDSR()
-    elif model_name == "hat":
-        return HAT()
-    else:
-        raise ValueError(f"Modelo desconhecido: {model_name}")
-
 
 def train(args):
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
-    model = get_model(args.model).to(device)
+    if args.model == "EDSR":
+        model = EDSR().to(device)
+    elif args.model == "HAT":
+        model = HAT().to(device)
+
     dataloader = get_dataloader(args.data_dir, batch_size=args.batch_size)
     optimizer = Adam(model.parameters(), lr=args.lr)
     loss_fn = nn.L1Loss()
@@ -51,12 +47,11 @@ def train(args):
         print(f"Epoch {epoch+1}/{args.epochs} | Loss: {avg_loss:.4f}")
 
     torch.save(model.state_dict(), output_dir / "weights.pth")
-    print(f"Modelo salvo em {output_dir / 'weights.pth'}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True, choices=["edsr", "hat"])
+    parser.add_argument("--model", type=str, required=True, choices=["EDSR", "HAT"])
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=8)
