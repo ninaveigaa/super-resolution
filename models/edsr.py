@@ -27,7 +27,8 @@ class EDSR(nn.Module):
             nn.PixelShuffle(2),
             nn.Conv2d(n_feats, n_feats * 4, kernel_size=3, padding=1),
             nn.PixelShuffle(2),
-            nn.Conv2d(n_feats, out_channels, kernel_size=3, padding=1)
+            nn.Conv2d(n_feats, out_channels, kernel_size=3, padding=1),
+            nn.Tanh()
         )
 
     def forward(self, x):
