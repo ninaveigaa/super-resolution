@@ -98,7 +98,7 @@ valid_loader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_worke
 
 if __name__ == "__main__":
     # Training Loop
-    num_epochs = 1
+    num_epochs = 100
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0.0
