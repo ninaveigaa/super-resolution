@@ -1,2 +1,11 @@
 data/
 jobs/
+venv/
+logs/
+bin/
+*.out
+*.err
+include/
+lib/
+lib64
+pyvenv.cfg
