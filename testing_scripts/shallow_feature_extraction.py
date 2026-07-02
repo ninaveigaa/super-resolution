@@ -33,12 +33,12 @@ class Shallow_Feature_Extractor(nn.Module):
 #--------------------------------------------------------------------------------------------------------------
 # Shallow Feature Extractor - Training
 #--------------------------------------------------------------------------------------------------------------
-
-model = Shallow_Feature_Extractor()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = Shallow_Feature_Extractor().to(device)
 optimizer = optim.Adam(model.parameters(), lr=2e-4)
 loss_fn = nn.L1Loss()
-psnr = PeakSignalNoiseRatio(data_range=1.0)
-ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+psnr = PeakSignalNoiseRatio(data_range=1.0).to(device)
+ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
 
 def train_step(model, optimizer, loss_fn, input_data, target_data):
     optimizer.zero_grad()
@@ -103,6 +103,7 @@ if __name__ == "__main__":
         model.train()
         train_loss = 0.0
         for lr_patch, hr_patch in train_loader:
+            lr_patch, hr_patch = lr_patch.to(device), hr_patch.to(device)
             loss = train_step(model, optimizer, loss_fn, lr_patch, hr_patch)
             train_loss += loss
         
@@ -114,11 +115,18 @@ if __name__ == "__main__":
         valid_loss = 0.0
         with torch.no_grad():
             for lr_patch, hr_patch in valid_loader:
+                lr_patch, hr_patch = lr_patch.to(device), hr_patch.to(device)
                 output = model(lr_patch)
                 loss = loss_fn(output, hr_patch)
                 valid_loss += loss.item()
-                PSNR = psnr(output, hr_patch)
-                SSIM = ssim(output, hr_patch)
+                PSNR = psnr.update(output, hr_patch)
+                SSIM = ssim.update(output, hr_patch)
         
+        avg_PSNR = psnr.compute()
+        avg_SSIM = ssim.compute()
+
+        psnr.reset()
+        ssim.reset()
+
         avg_valid_loss = valid_loss / len(valid_loader)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Valid Loss: {avg_valid_loss:.4f}, PSNR: {PSNR:.4f}, SSIM: {SSIM:.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}], Valid Loss: {avg_valid_loss:.4f}, PSNR: {avg_PSNR:.4f}, SSIM: {avg_SSIM:.4f}")
