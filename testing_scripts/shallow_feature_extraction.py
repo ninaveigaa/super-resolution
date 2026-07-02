@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-from datasets import load_dataset 
+from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 import os
 from PIL import Image
 import numpy as np
-import kagglehub
+
 
 #--------------------------------------------------------------------------------------------------------------
 # Shallow Feature Extractor - Architecture
@@ -36,6 +37,8 @@ class Shallow_Feature_Extractor(nn.Module):
 model = Shallow_Feature_Extractor()
 optimizer = optim.Adam(model.parameters(), lr=2e-4)
 loss_fn = nn.L1Loss()
+psnr = PeakSignalNoiseRatio(data_range=1.0)
+ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
 
 def train_step(model, optimizer, loss_fn, input_data, target_data):
     optimizer.zero_grad()
@@ -82,18 +85,40 @@ class SRDataset(Dataset):
         return hr_patch, lr_patch
     
 # Dataset Directories
-DIV2K_train_HR_dir = kagglehub.dataset_download("takihasan/div2k-dataset-for-super-resolution/DIV2K_train_HR")
-DIV2K_valid_HR_dir = kagglehub.dataset_download("takihasan/div2k-dataset-for-super-resolution/DIV2K_valid_HR")
+train_dataset = SRDataset(hr_dir="data/DIV2K/DIV2K_train_HR", patch_size=256, scale_factor=4)
+valid_dataset = SRDataset(hr_dir="data/DIV2K/DIV2K_valid_HR", patch_size=256, scale_factor=4)
 
-# Dataset Preparation
-train_dataset = SRDataset(hr_dir=DIV2K_train_HR_dir, patch_size=256, scale_factor=4)
-valid_dataset = SRDataset(hr_dir=DIV2K_valid_HR_dir, patch_size=256, scale_factor=4)
-
-# DatLoader
+# DataLoader
 train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
 valid_loader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=4)
-
 
 #--------------------------------------------------------------------------------------------------------------
 # Shallow Feature Extractor - Main
 #--------------------------------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # Training Loop
+    num_epochs = 1
+    for epoch in range(num_epochs):
+        model.train()
+        train_loss = 0.0
+        for lr_patch, hr_patch in train_loader:
+            loss = train_step(model, optimizer, loss_fn, lr_patch, hr_patch)
+            train_loss += loss
+        
+        avg_train_loss = train_loss / len(train_loader)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}")
+
+        # Validation Loop
+        model.eval()
+        valid_loss = 0.0
+        with torch.no_grad():
+            for lr_patch, hr_patch in valid_loader:
+                output = model(lr_patch)
+                loss = loss_fn(output, hr_patch)
+                valid_loss += loss.item()
+                PSNR = psnr(output, hr_patch)
+                SSIM = ssim(output, hr_patch)
+        
+        avg_valid_loss = valid_loss / len(valid_loader)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Valid Loss: {avg_valid_loss:.4f}, PSNR: {PSNR:.4f}, SSIM: {SSIM:.4f}")
