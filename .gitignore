@@ -1,11 +1,19 @@
-data/
-jobs/
-venv/
-logs/
-bin/
-*.out
-*.err
+# Environment
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+super-resolution/
 include/
 lib/
 lib64
+bin/
 pyvenv.cfg
+
+# Data & outputs
+data/
+outputs/
+test_checkpoints/
+logs/
+*.pth
+*.pt
