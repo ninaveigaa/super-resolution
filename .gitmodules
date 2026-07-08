@@ -4,3 +4,6 @@
 [submodule "dualedsr_tensorflow_og"]
 	path = submodules/DualEDSR_TS_OG
 	url = https://github.com/wliangaz/Dual-EDSR.git
+[submodule "submodules/DualEDSR_TS_2026"]
+	path = submodules/DualEDSR_TS_2026
+	url = https://github.com/ninaveigaa/DualEDSR_TS_2026.git
