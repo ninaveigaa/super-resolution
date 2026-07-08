@@ -1,3 +1,6 @@
 [submodule "HAT"]
 	path = HAT
 	url = https://github.com/XPixelGroup/HAT.git
+[submodule "dualedsr_tensorflow_og"]
+	path = dualedsr_tensorflow_og
+	url = https://github.com/wliangaz/Dual-EDSR.git
