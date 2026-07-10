@@ -53,6 +53,9 @@ def args():
     parser.add_argument('--test_save_dir', dest='test_save_dir', default='/media/user/SSD2/', help='test sample are saved here')
     args = parser.parse_args()
 
+    # Metrics Tracker
+    parser.add_argument('--metricsTracker', dest='metricsTracker', type=str2bool, default=True, help='if metrics are tracked')  
+
     return args
     
 def str2bool(v):
