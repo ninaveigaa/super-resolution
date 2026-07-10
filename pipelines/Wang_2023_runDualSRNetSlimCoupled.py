@@ -23,7 +23,7 @@ import imageio
 from matplotlib import pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from configs.Wang_2023_train_dualedsr_tf_args import build_argparser
+from configs.Wang_2023_dualSRNetArgs.py import build_argparser
 from src import metrics
 
 
