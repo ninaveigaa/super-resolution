@@ -1,1 +1,1 @@
-from . import Wang_2023_dualSRNetArgs.py
+from . import Wang_2023_dualSRNetArgs

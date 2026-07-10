@@ -3,6 +3,10 @@ import argparse
 def args():
     # TODO modularise this into concentricGAN noise->clean->SR->seg->vels
     parser = argparse.ArgumentParser(description='')
+
+    # Metrics Tracker
+    parser.add_argument('--metricsTracker', dest='metricsTracker', type=str2bool, default=True, help='if metrics are tracked')  
+
     #training arguments
     parser.add_argument('--mixedPrecision', dest='mixedPrecision', type=str2bool, default=False, help='16bit computes')
     parser.add_argument('--gpuIDs', dest='gpuIDs', type=str, default='2', help='IDs for the GPUs. Empty for CPU. Nospaces')
@@ -53,8 +57,7 @@ def args():
     parser.add_argument('--test_save_dir', dest='test_save_dir', default='/media/user/SSD2/', help='test sample are saved here')
     args = parser.parse_args()
 
-    # Metrics Tracker
-    parser.add_argument('--metricsTracker', dest='metricsTracker', type=str2bool, default=True, help='if metrics are tracked')  
+
 
     return args
     

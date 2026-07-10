@@ -23,18 +23,18 @@ import imageio
 from matplotlib import pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from configs.Wang_2023_dualSRNetArgs.py import build_argparser
+import configs.Wang_2023_dualSRNetArgs
 from src import metrics
 
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 print(tf.__version__)
 
-# --- argparse replaces the original dualSRNetArgs.args() ---
-args = build_argparser().parse_args()
+# --- argparse---
+args = configs.Wang_2023_dualSRNetArgs.args()
 
 # --- metrics tracking setup (Integration Point 1) ---
-if args.trackMetrics:
+if args.metricsTracker:
     run_id = metrics.save_args(args, model_name=args.modelName, log_dir="logs")
     tracker = metrics.MetricsTracker(log_dir="logs", run_id=run_id)
     tracker.start_training()
@@ -667,7 +667,7 @@ with strategy.scope():
                     num_batches += 1
 
                     # --- Integration Point 2 (start timing this iteration) ---
-                    if args.trackMetrics:
+                    if args.metricsTracker:
                         tracker.start_iteration()
 
                     GABL, GBAL, ADVXYSRL, DXYSRL, ADVYZSRL, DYZSRL = distributed_train_step(x, y)
@@ -680,7 +680,7 @@ with strategy.scope():
                     currentTime=time.time()
 
                     # --- Integration Point 2 (log loss for this iteration) ---
-                    if args.trackMetrics:
+                    if args.metricsTracker:
                         tracker.log_iteration(
                             num_batches,
                             loss_xy=float(GABL), loss_z=float(GBAL),
@@ -781,7 +781,7 @@ with strategy.scope():
                 # --- Integration Point 3 (log validation PSNR, reusing the
                 # CURRENT iteration count -- num_batches -- not None; see the
                 # discussion on why iteration must stay non-null for plotting) ---
-                if args.trackMetrics:
+                if args.metricsTracker:
                     tracker.log_iteration(
                         num_batches, epoch=epoch,
                         psnr_xy=float(valPSNRC), psnr_final=float(valPSNRCC),
