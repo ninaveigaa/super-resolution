@@ -6,3 +6,4 @@ different pipelines
 
 from . import preprocessing
 
+from . import metrics
