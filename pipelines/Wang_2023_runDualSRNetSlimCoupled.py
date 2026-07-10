@@ -4,10 +4,12 @@ Double 2D super resolution method
 
 #TODO: write up testing section if train if test. enable substacking!
 #from __future__ import absolute_import, division, print_function, unicode_literals
+import sys
+from pathlib import Path
+
 import tensorflow as tf
 from keras import backend as K
 from keras import mixed_precision
-import dualSRNetArgs
 import tifffile
 # Helper libraries
 from sys import stdout
@@ -20,11 +22,23 @@ import pdb
 import imageio
 from matplotlib import pyplot as plt
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from configs.Wang_2023_train_dualedsr_tf_args import build_argparser
+from src import metrics
+
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 print(tf.__version__)
 
-args=dualSRNetArgs.args() # args is global
+# --- argparse replaces the original dualSRNetArgs.args() ---
+args = build_argparser().parse_args()
+
+# --- metrics tracking setup (Integration Point 1) ---
+if args.trackMetrics:
+    run_id = metrics.save_args(args, model_name=args.modelName, log_dir="logs")
+    tracker = metrics.MetricsTracker(log_dir="logs", run_id=run_id)
+    tracker.start_training()
+    print(f"[metrics] Tracking enabled. run_id = {run_id}")
 
 gpuList = ','.join([g.strip() for g in args.gpuIDs.split(',') if g.strip()])
 args.numGPUs = len(gpuList.split(',')) if gpuList else 0
@@ -367,19 +381,6 @@ with strategy.scope():
         x = tf.keras.layers.Dense(1024)(x)
         x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
         xOut = tf.keras.layers.Dense(1, dtype='float32')(x)
-        '''
-        h = lrelu(conv2d(image, options.df_dim, ks=3, s=1, name='dInitConv'))
-        h = lrelu(batchnormSR(conv2d(h, options.df_dim, ks=3, s=s, name='dUpConv')))
-        for i in range(numDiscBlocks):
-            expon=2**(i+1)
-            h = lrelu(batchnormSR(conv2d(h, options.df_dim*expon, ks=3, s=1, name=f'dBlock{i+1}Conv')))
-            h = lrelu(batchnormSR(conv2d(h, options.df_dim*expon, ks=3, s=2, name=f'dBlock{i+1}UpConv')))
-        h = conv2d(h, 1, ks=3, s=1, name='d_h3_pred')
-        #h = lrelu(denselayer(slim.flatten(h), 1024, name="dFC1"))
-        #h = denselayer(h, 1, name="dFCout")
-        return h
-        
-        '''  
         return tf.keras.Model(inputs=[xIn], outputs=xOut, name="DiscrimSR")
         
     def DiscriminatorSRGAN3D(args):
@@ -664,6 +665,11 @@ with strategy.scope():
             while num_batches < args.itersPerEpoch*args.iterCyclesPerEpoch:
                 for x, y in zip(HR_dataset, LR_dataset):
                     num_batches += 1
+
+                    # --- Integration Point 2 (start timing this iteration) ---
+                    if args.trackMetrics:
+                        tracker.start_iteration()
+
                     GABL, GBAL, ADVXYSRL, DXYSRL, ADVYZSRL, DYZSRL = distributed_train_step(x, y)
                     totGABL += GABL
                     totGBAL += GBAL
@@ -672,8 +678,15 @@ with strategy.scope():
                     totADVYZSRL += ADVYZSRL
                     totDYZSRL += DYZSRL
                     currentTime=time.time()
-                    
-                    
+
+                    # --- Integration Point 2 (log loss for this iteration) ---
+                    if args.trackMetrics:
+                        tracker.log_iteration(
+                            num_batches,
+                            loss_xy=float(GABL), loss_z=float(GBAL),
+                            epoch=epoch, learning_rate=lr,
+                        )
+
                     stdout.write("\rEpoch: %4d, Iter: %4d, Time: %4.4f, Speed: %4.4f its/s, GSRxyL: %4.4f, GSRyzL: %4.4f, advSRxyL: %4.4f, advSRyzL: %4.4f, DSRxyL: %4.4f, DSRyzL: %4.4f" % (epoch+1, num_batches, currentTime-start_time, 1/(currentTime-lastTime), GABL, GBAL, ADVXYSRL, ADVYZSRL, DXYSRL, DYZSRL))
                     stdout.flush()
                     lastTime=currentTime
@@ -764,6 +777,15 @@ with strategy.scope():
 
                 valPSNRC /= numTestBatches
                 valPSNRCC /= numTestBatches
+
+                # --- Integration Point 3 (log validation PSNR, reusing the
+                # CURRENT iteration count -- num_batches -- not None; see the
+                # discussion on why iteration must stay non-null for plotting) ---
+                if args.trackMetrics:
+                    tracker.log_iteration(
+                        num_batches, epoch=epoch,
+                        psnr_xy=float(valPSNRC), psnr_final=float(valPSNRCC),
+                    )
 
                 stdout.write("\n")
                 print(f'Mean Validation PSNR-SR: {valPSNRC}, PSNR-SRC: {valPSNRCC}')
@@ -915,20 +937,6 @@ with strategy.scope():
                 imageio.imwrite(f'{args.test_temp_save_dir}/{fileName}_result_SRxy_{i}.png', maxSR.astype(np.uint8))
             i=i+1
 
-#        stacks=[] # dont initialise to fool python into paging the slices - after above loop to reduce error time
-#        for z in range(len(testFiles)):
-#            testFile=testFiles[z]
-#            fileName=testFile.split('.')[0]
-#            fileName=fileName.split('/')[-1]
-#            slicez = np.load(f'{args.test_temp_save_dir}/{args.modelName}/{fileName}_result_SRxy_{z}.npy')
-#            stacks.append(slicez)
-#            stdout.write("\rLoading XY Slice %d" % (z+1))
-#            stdout.flush()
-#        stdout.write("\n")
-#        print(f'Stack Loaded')
-        # transpose the stack in pieces. I guess....
-        #stacks=np.stack(stacks,2)
-        #ABsr=np.zeros([5688,5688])
         for j in range(22751, 32400):
             #ABsr=np.zeros([5688,5688])
             print(f'XZ Pass: Downsampling and Super Resolving Slice {j}')
@@ -984,20 +992,4 @@ with strategy.scope():
                     maxSR[:,(z)*args.scale:(z+maxNz-dualLength)*args.scale]=ABsr[:,dualLength//2*args.scale:(maxNz-dualLength//2)*args.scale]
                     z=z+maxNz-dualLength
                 zz=zz+maxNz-dualLength
-#            for j in range(ABsr.shape[0]):
-#                np.save(f'{args.test_temp_save_dir}/{args.modelName}/{fileName}_result_SRxy_{i}_{j}.npy',ABsr[:,j]) 
-#                stdout.write("\rSaving stick %d" % (j+1))
-#                stdout.flush()
-#            stdout.write("\n")
-#            if np.mod(i,100)==0:
-#                imageio.imwrite(f'{args.test_temp_save_dir}/{fileName}_result_SRxy_{i}.png', ABsr.astype(np.uint8))
-            #tifffile.imwrite(f'{args.test_save_dir}/{args.modelName}/{fileName}_result_SRxyz_{j}.tif', maxSR)
             imageio.imwrite(f'{args.test_save_dir}/{args.modelName}/{fileName}_result_SRxyz_{j}.png', maxSR)
-#            ABsr=generatorSRC(transSlice)
-#            ABsr=np.asarray(ABsr)
-#            ABsr=np.squeeze(ABsr)
-#            ABsr=(ABsr+1)*127.5
-#            ABsr=tf.math.round(ABsr)
-#            ABsr=np.asarray(ABsr,'uint8')
-#            imageio.imwrite(f'{args.test_save_dir}/{args.modelName}/{fileName}_result_SRxyz_{j}.png', ABsr)
-
