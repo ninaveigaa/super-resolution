@@ -34,7 +34,7 @@ print(tf.__version__)
 args = Wang_2023_dualSRNetArgs.args()
 
 # --- NEW: metrics tracking setup (Integration Point 1) ---
-if args.trackMetrics:
+if args.metricsTracker:
     run_id = metrics.save_args(args, model_name=args.modelName, log_dir="metrics")
     tracker = metrics.MetricsTracker(log_dir="metrics", run_id=run_id)
     tracker.start_training()
@@ -720,7 +720,7 @@ with strategy.scope():
                     num_batches += 1
 
                     # --- NEW: Integration Point 2 (start timing this iteration) ---
-                    if args.trackMetrics:
+                    if args.metricsTracker:
                         tracker.start_iteration()
 
                     GABL, GBAL, ADVXYSRL, DXYSRL, ADVYZSRL, DYZSRL = distributed_train_step(x, y)
@@ -733,7 +733,7 @@ with strategy.scope():
                     currentTime=time.time()
 
                     # --- NEW: Integration Point 2 (log loss for this iteration) ---
-                    if args.trackMetrics:
+                    if args.metricsTracker:
                         tracker.log_iteration(
                             num_batches,
                             loss_xy=float(GABL), loss_z=float(GBAL),
@@ -834,7 +834,7 @@ with strategy.scope():
                 # --- NEW: Integration Point 3 (log validation PSNR, reusing the
                 # CURRENT iteration count -- num_batches -- not None; see the
                 # discussion on why iteration must stay non-null for plotting) ---
-                if args.trackMetrics:
+                if args.metricsTracker:
                     tracker.log_iteration(
                         num_batches, epoch=epoch,
                         psnr_xy=float(valPSNRC), psnr_final=float(valPSNRCC),
