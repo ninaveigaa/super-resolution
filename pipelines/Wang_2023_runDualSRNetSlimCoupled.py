@@ -36,7 +36,7 @@ args = configs.Wang_2023_dualSRNetArgs.args()
 # --- metrics tracking setup (Integration Point 1) ---
 if args.metricsTracker:
     run_id = metrics.save_args(args, model_name=args.modelName, log_dir="metrics")
-    tracker = metrics.MetricsTracker(log_dir="metrics", run_id=run_id)
+    tracker = metrics.MetricsTracker(log_dir="metrics", run_id=run_id, log_every=50)
     tracker.start_training()
     print(f"[metrics] Tracking enabled. run_id = {run_id}")
 
