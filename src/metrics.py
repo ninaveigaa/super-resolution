@@ -18,14 +18,20 @@ convention used in the original DualEDSR training script:
     - ssim_xy, ssim_final   (periodic, from validation -- None otherwise)
 """
 
+from __future__ import annotations
+
 import time
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import psutil
-import torch
-import torch.nn.functional as F
+
+try:
+    import torch
+    _HAS_TORCH = True
+except ImportError:
+    _HAS_TORCH = False
 
 try:
     from torchmetrics.functional import structural_similarity_index_measure as _tm_ssim
@@ -101,15 +107,23 @@ def load_model_registry(model_name: str, log_dir: str = "logs") -> pd.DataFrame:
 
 
 def generate_run_id(model_name: str, timestamp: datetime = None) -> str:
-    """Builds a unique, sortable run identifier: '{model_name}_{YYYYMMDD_HHMMSS}'.
+    """Builds a unique, sortable run identifier: '{model_name}_{YYMMDD_HHMM}'.
 
-    e.g. generate_run_id("dualedsr") -> "dualedsr_20260710_143200"
+    e.g. generate_run_id("dualedsr") -> "dualedsr_260710_1432"
 
     Passing `timestamp` explicitly is mainly useful for testing; in normal
     use, it defaults to the current time.
+
+    NOTE: at minute-level granularity (no seconds), two runs of the SAME
+    model started within the same minute will collide and produce an
+    IDENTICAL run_id -- this can happen easily with quick back-to-back
+    sanity-test runs. If you need to guarantee uniqueness across rapid
+    successive runs, consider adding seconds back, or check
+    load_model_registry() for an existing run_id before relying on this
+    one being unique.
     """
     timestamp = timestamp or datetime.now()
-    return f"{model_name}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+    return f"{model_name}_{timestamp.strftime('%y%m%d_%H%M')}"
 
 
 class MetricsTracker:
@@ -146,7 +160,7 @@ class MetricsTracker:
     def start_training(self):
         """Call once, right before the training loop begins."""
         self._train_start_time = time.time()
-        if torch.cuda.is_available():
+        if _HAS_TORCH and torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
     def start_iteration(self):
@@ -177,7 +191,7 @@ class MetricsTracker:
 
         ram_mb = self._process.memory_info().rss / 1e6
         gpu_mem_mb = (torch.cuda.max_memory_allocated() / 1e6
-                      if torch.cuda.is_available() else None)
+                      if _HAS_TORCH and torch.cuda.is_available() else None)
 
         record = {
             "run_id": self.run_id,
@@ -241,6 +255,7 @@ def _manual_ssim(sr: torch.Tensor, hr: torch.Tensor, data_range: float = 2.0,
                   window_size: int = 11) -> float:
     """Minimal single-scale SSIM fallback (Gaussian window), used only if
     torchmetrics is not installed."""
+    import torch.nn.functional as F
 
     channel = sr.shape[1]
     sigma = 1.5
