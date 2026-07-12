@@ -40,7 +40,7 @@ except ImportError:
     _HAS_TORCHMETRICS = False
 
 
-def save_args(args, model_name: str, log_dir: str = "logs") -> str:
+def save_args(args, model_name: str, log_dir: str = "metrics") -> str:
     """Given an `argparse.Namespace` (or a plain dict) of training arguments,
     generates a run_id and appends one row to
     {log_dir}/{model_name}_runs_registry.csv -- a per-model table, with one
@@ -80,7 +80,7 @@ def save_args(args, model_name: str, log_dir: str = "logs") -> str:
     return run_id
 
 
-def get_run_args(model_name: str, run_id: str, log_dir: str = "logs") -> dict:
+def get_run_args(model_name: str, run_id: str, log_dir: str = "metrics") -> dict:
     """Looks up a single run's arguments from {model_name}_runs_registry.csv,
     indexed by run_id. Returns the matching row as a dict.
 
@@ -97,7 +97,7 @@ def get_run_args(model_name: str, run_id: str, log_dir: str = "logs") -> dict:
     return match.iloc[0].to_dict()
 
 
-def load_model_registry(model_name: str, log_dir: str = "logs") -> pd.DataFrame:
+def load_model_registry(model_name: str, log_dir: str = "metrics") -> pd.DataFrame:
     """Reads back the full registry of past runs for a given model, as a
     pandas DataFrame (one row per run, one column per argument)."""
     registry_path = Path(log_dir) / f"{model_name}_runs_registry.csv"
@@ -132,7 +132,7 @@ class MetricsTracker:
 
     Usage:
         run_id = generate_run_id("dualedsr")
-        tracker = MetricsTracker(log_dir="logs", run_id=run_id)
+        tracker = MetricsTracker(log_dir="metrics", run_id=run_id)
         tracker.start_training()
 
         for iteration in range(total_iterations):
