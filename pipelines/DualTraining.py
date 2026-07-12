@@ -1,8 +1,15 @@
 """
-Training script for DualEDSR.
+Generic dual-solver training script.
+
+Trains a pair of models jointly -- a 2D solver (handling the XY plane) and
+a 1D solver (handling the Z axis) -- following the DualEDSR-style two-stage
+architecture. This script is NOT specific to any one model: any 2D/1D
+solver pair can be plugged in (e.g. EDSR + EDSR1D). The actual model
+classes are imported and instantiated by the job submission script that
+calls this training harness, not hardcoded here.
 
 Usage:
-    python train.py \
+    python DualTraining.py \
         --dataset_dir /path/to/data/ \
         --checkpoint_dir /path/to/checkpoints/ \
         --model_name dual_edsr \

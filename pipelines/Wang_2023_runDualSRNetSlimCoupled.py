@@ -23,20 +23,20 @@ import imageio
 from matplotlib import pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import configs.Wang_2023_dualSRNetArgs
+from configs.Wang_2023_train_dualedsr_tf_args import build_argparser
 from src import metrics
 
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 print(tf.__version__)
 
-# --- argparse---
-args = configs.Wang_2023_dualSRNetArgs.args()
+# --- NEW: argparse replaces the original dualSRNetArgs.args() ---
+args = build_argparser().parse_args()
 
-# --- metrics tracking setup (Integration Point 1) ---
-if args.metricsTracker:
+# --- NEW: metrics tracking setup (Integration Point 1) ---
+if args.trackMetrics:
     run_id = metrics.save_args(args, model_name=args.modelName, log_dir="metrics")
-    tracker = metrics.MetricsTracker(log_dir="metrics", run_id=run_id, log_every=50)
+    tracker = metrics.MetricsTracker(log_dir="metrics", run_id=run_id)
     tracker.start_training()
     print(f"[metrics] Tracking enabled. run_id = {run_id}")
 
@@ -60,6 +60,20 @@ print('Variable dtype: %s' % policy.variable_dtype)
 # detect hardware
 if args.numGPUs <= 1:
     device = "/gpu:0" if args.numGPUs == 1 else "/cpu:0"
+
+    # Safeguard: if a GPU was requested (numGPUs >= 1) but TensorFlow can't
+    # actually see one, abort now instead of silently training on CPU for
+    # hours (which is what happened before -- ~3.8s/iteration, eventually
+    # killed by Alvis's idle-GPU job monitor).
+    if args.numGPUs == 1 and len(tf.config.list_physical_devices('GPU')) == 0:
+        raise RuntimeError(
+            "Requested 1 GPU (--gpuIDs) but TensorFlow detected 0 physical "
+            "GPU devices. This usually means the node's CUDA driver is "
+            "unavailable (see CUDA_ERROR_NO_DEVICE in the logs). Aborting "
+            "instead of silently falling back to CPU -- resubmit the job "
+            "to get allocated a different node."
+        )
+
     strategy = tf.distribute.OneDeviceStrategy(device=device)
 else:
     #strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
@@ -96,14 +110,19 @@ with strategy.scope():
         #cropped_image = tf.image.random_crop(image, size=[image.shape[0], np.min((height,image.shape[1])), np.min((width,image.shape[2])), image.shape[3]])
         return cropped_image
     
-    def createTrainingCubes2(args,HR,LRxy,batchsize,cropsize,scale):
+    def createTrainingCubes2(args,HR,LRxy,batchsize,cropsize,scale,n_batches=None):
         # read an HR block and extract the LRxy,LRyz, and LRxz blocks of size itersperepoch*batch,x,y,1
         # permute the block so the lrbc dimension is in the batch dimension
-        batchLR = np.zeros([batchsize*args.itersPerEpoch,cropsize,cropsize,1],'float32')
-        batchHR = np.zeros([batchsize*args.itersPerEpoch*scale,cropsize*scale,cropsize*scale,1],'float32')
+        # n_batches: how many cubes to generate. Defaults to args.itersPerEpoch
+        # (the original training behavior); pass a smaller explicit value
+        # (e.g. args.valNum) to generate validation cubes instead.
+        if n_batches is None:
+            n_batches = args.itersPerEpoch
+        batchLR = np.zeros([batchsize*n_batches,cropsize,cropsize,1],'float32')
+        batchHR = np.zeros([batchsize*n_batches*scale,cropsize*scale,cropsize*scale,1],'float32')
         n=0
         n2=0
-        for i in range(args.itersPerEpoch):
+        for i in range(n_batches):
             # cycle between xy,yz, and xz for extra data - first version was fucked because batch is explicitly the bc dim but it wasnt in this implementation 
             if np.mod(i,3)==0:
                 x=int(np.floor(np.random.rand()*(LRxy.shape[0]-batchsize)))
@@ -142,7 +161,7 @@ with strategy.scope():
             n=n+batchsize
             n2=n2+batchsize*scale
             
-            stdout.write("\rHR Cube: %d of %d" % (i+1, args.itersPerEpoch))
+            stdout.write("\rHR Cube: %d of %d" % (i+1, n_batches))
             stdout.flush()
         stdout.write("\n")
         return batchHR,batchLR
@@ -381,6 +400,19 @@ with strategy.scope():
         x = tf.keras.layers.Dense(1024)(x)
         x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
         xOut = tf.keras.layers.Dense(1, dtype='float32')(x)
+        '''
+        h = lrelu(conv2d(image, options.df_dim, ks=3, s=1, name='dInitConv'))
+        h = lrelu(batchnormSR(conv2d(h, options.df_dim, ks=3, s=s, name='dUpConv')))
+        for i in range(numDiscBlocks):
+            expon=2**(i+1)
+            h = lrelu(batchnormSR(conv2d(h, options.df_dim*expon, ks=3, s=1, name=f'dBlock{i+1}Conv')))
+            h = lrelu(batchnormSR(conv2d(h, options.df_dim*expon, ks=3, s=2, name=f'dBlock{i+1}UpConv')))
+        h = conv2d(h, 1, ks=3, s=1, name='d_h3_pred')
+        #h = lrelu(denselayer(slim.flatten(h), 1024, name="dFC1"))
+        #h = denselayer(h, 1, name="dFCout")
+        return h
+        
+        '''  
         return tf.keras.Model(inputs=[xIn], outputs=xOut, name="DiscrimSR")
         
     def DiscriminatorSRGAN3D(args):
@@ -546,13 +578,13 @@ with strategy.scope():
             gradDsrXY = tape.gradient(totalDsrXYLossScal, discriminatorSR.trainable_variables)
             gradDsrYZ = tape.gradient(totalDsrYZLossScal, discriminatorSRC.trainable_variables)
             
-	# get unscaled gradients
+# get unscaled gradients
         unsc_gradGsr = optimizerGeneratorSR.get_unscaled_gradients(gradGsr)
         unsc_gradGsrc = optimizerGeneratorSRC.get_unscaled_gradients(gradGsrc)
         if args.ganFlag:
             unsc_gradDsrXY = optimizerDiscriminatorSR.get_unscaled_gradients(gradDsrXY)
             unsc_gradDsrYZ = optimizerDiscriminatorSRC.get_unscaled_gradients(gradDsrYZ)
-	
+
         # apply gradients
         optimizerGeneratorSR.apply_gradients(zip(unsc_gradGsr,generatorSR.trainable_variables))
         optimizerGeneratorSRC.apply_gradients(zip(unsc_gradGsrc,generatorSRC.trainable_variables))
@@ -615,8 +647,17 @@ with strategy.scope():
 
         # commented removed
         # HR=np.transpose(HR,[2,1,0])
-        
-        
+
+        # Load held-out validation data ONCE, from a SEPARATE directory --
+        # NOT the same data used for training. Previously, "validation"
+        # here reused a slice of that epoch's own random training batches,
+        # which is not a genuine held-out check.
+        valLRLoc=glob(args.val_dataset_dir+'LR/LR.npy')
+        valLRxy=np.load(valLRLoc[0])
+        valHRLoc=glob(args.val_dataset_dir+'HR/HR.npy')
+        valHR=np.load(valHRLoc[0])
+        print(f'Loaded validation data from {args.val_dataset_dir} (LR shape: {valLRxy.shape}, HR shape: {valHR.shape})')
+
         if args.valTest:
             LRTestLoc=glob(args.dataset_dir+'test/*')
             LRTest=np.load(LRTestLoc[0])
@@ -638,14 +679,26 @@ with strategy.scope():
            
             HR_dataset = tf.data.Dataset.from_tensor_slices((realHRBatches)).batch(batchSizeThisEpoch*args.scale) 
             HR_dataset_dist = strategy.experimental_distribute_dataset(HR_dataset)
-            
-            HR_dataset_test=tf.data.Dataset.from_tensor_slices((realHRBatches[0:args.valNum*batchSizeThisEpoch*args.scale])).batch(batchSizeThisEpoch*args.scale) 
-            
-            
+
+            # Validation batches now come from the SEPARATE, held-out
+            # validation set (valLRxy/valHR), not from a slice of this
+            # epoch's own training batches. The validation volumes are
+            # smaller (especially along one axis), so the patch/batch size
+            # is capped to whatever fits safely inside them -- reusing
+            # batchSizeThisEpoch/fineSizeThisEpoch directly could exceed
+            # the validation data's bounds and crash (the same kind of
+            # issue --fine_size caused on the training data earlier).
+            valBatchSize = min(batchSizeThisEpoch, valLRxy.shape[0]-1, valLRxy.shape[1]-1, valLRxy.shape[2]-1)
+            valCropSize  = min(fineSizeThisEpoch,  valLRxy.shape[0]-1, valLRxy.shape[1]-1, valLRxy.shape[2]-1)
+            valHRBatches, valBCBatches = createTrainingCubes2(
+                args, valHR, valLRxy, valBatchSize, valCropSize, args.scale,
+                n_batches=args.valNum,
+            )
+            HR_dataset_test = tf.data.Dataset.from_tensor_slices(valHRBatches).batch(valBatchSize*args.scale)
+            LR_dataset_test = tf.data.Dataset.from_tensor_slices(valBCBatches).batch(valBatchSize)
+
             LR_dataset = tf.data.Dataset.from_tensor_slices((realBCBatches)).batch(batchSizeThisEpoch) 
             LR_dataset_dist = strategy.experimental_distribute_dataset(LR_dataset)
-            
-            LR_dataset_test=tf.data.Dataset.from_tensor_slices((realBCBatches[0:args.valNum*batchSizeThisEpoch])).batch(batchSizeThisEpoch) 
             # TRAIN LOOP
             lastTime=time.time()
 
@@ -666,8 +719,8 @@ with strategy.scope():
                 for x, y in zip(HR_dataset, LR_dataset):
                     num_batches += 1
 
-                    # --- Integration Point 2 (start timing this iteration) ---
-                    if args.metricsTracker:
+                    # --- NEW: Integration Point 2 (start timing this iteration) ---
+                    if args.trackMetrics:
                         tracker.start_iteration()
 
                     GABL, GBAL, ADVXYSRL, DXYSRL, ADVYZSRL, DYZSRL = distributed_train_step(x, y)
@@ -679,8 +732,8 @@ with strategy.scope():
                     totDYZSRL += DYZSRL
                     currentTime=time.time()
 
-                    # --- Integration Point 2 (log loss for this iteration) ---
-                    if args.metricsTracker:
+                    # --- NEW: Integration Point 2 (log loss for this iteration) ---
+                    if args.trackMetrics:
                         tracker.log_iteration(
                             num_batches,
                             loss_xy=float(GABL), loss_z=float(GBAL),
@@ -778,10 +831,10 @@ with strategy.scope():
                 valPSNRC /= numTestBatches
                 valPSNRCC /= numTestBatches
 
-                # --- Integration Point 3 (log validation PSNR, reusing the
+                # --- NEW: Integration Point 3 (log validation PSNR, reusing the
                 # CURRENT iteration count -- num_batches -- not None; see the
                 # discussion on why iteration must stay non-null for plotting) ---
-                if args.metricsTracker:
+                if args.trackMetrics:
                     tracker.log_iteration(
                         num_batches, epoch=epoch,
                         psnr_xy=float(valPSNRC), psnr_final=float(valPSNRCC),
@@ -937,6 +990,20 @@ with strategy.scope():
                 imageio.imwrite(f'{args.test_temp_save_dir}/{fileName}_result_SRxy_{i}.png', maxSR.astype(np.uint8))
             i=i+1
 
+#        stacks=[] # dont initialise to fool python into paging the slices - after above loop to reduce error time
+#        for z in range(len(testFiles)):
+#            testFile=testFiles[z]
+#            fileName=testFile.split('.')[0]
+#            fileName=fileName.split('/')[-1]
+#            slicez = np.load(f'{args.test_temp_save_dir}/{args.modelName}/{fileName}_result_SRxy_{z}.npy')
+#            stacks.append(slicez)
+#            stdout.write("\rLoading XY Slice %d" % (z+1))
+#            stdout.flush()
+#        stdout.write("\n")
+#        print(f'Stack Loaded')
+        # transpose the stack in pieces. I guess....
+        #stacks=np.stack(stacks,2)
+        #ABsr=np.zeros([5688,5688])
         for j in range(22751, 32400):
             #ABsr=np.zeros([5688,5688])
             print(f'XZ Pass: Downsampling and Super Resolving Slice {j}')
@@ -992,4 +1059,19 @@ with strategy.scope():
                     maxSR[:,(z)*args.scale:(z+maxNz-dualLength)*args.scale]=ABsr[:,dualLength//2*args.scale:(maxNz-dualLength//2)*args.scale]
                     z=z+maxNz-dualLength
                 zz=zz+maxNz-dualLength
+#            for j in range(ABsr.shape[0]):
+#                np.save(f'{args.test_temp_save_dir}/{args.modelName}/{fileName}_result_SRxy_{i}_{j}.npy',ABsr[:,j]) 
+#                stdout.write("\rSaving stick %d" % (j+1))
+#                stdout.flush()
+#            stdout.write("\n")
+#            if np.mod(i,100)==0:
+#                imageio.imwrite(f'{args.test_temp_save_dir}/{fileName}_result_SRxy_{i}.png', ABsr.astype(np.uint8))
+            #tifffile.imwrite(f'{args.test_save_dir}/{args.modelName}/{fileName}_result_SRxyz_{j}.tif', maxSR)
             imageio.imwrite(f'{args.test_save_dir}/{args.modelName}/{fileName}_result_SRxyz_{j}.png', maxSR)
+#            ABsr=generatorSRC(transSlice)
+#            ABsr=np.asarray(ABsr)
+#            ABsr=np.squeeze(ABsr)
+#            ABsr=(ABsr+1)*127.5
+#            ABsr=tf.math.round(ABsr)
+#            ABsr=np.asarray(ABsr,'uint8')
+#            imageio.imwrite(f'{args.test_save_dir}/{args.modelName}/{fileName}_result_SRxyz_{j}.png', ABsr)
