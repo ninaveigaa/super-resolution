@@ -23,7 +23,7 @@ import imageio
 from matplotlib import pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from configs.Wang_2023_train_dualedsr_tf_args import build_argparser
+from configs import Wang_2023_dualSRNetArgs
 from src import metrics
 
 
@@ -31,7 +31,7 @@ AUTOTUNE = tf.data.experimental.AUTOTUNE
 print(tf.__version__)
 
 # --- NEW: argparse replaces the original dualSRNetArgs.args() ---
-args = build_argparser().parse_args()
+args = Wang_2023_dualSRNetArgs.args()
 
 # --- NEW: metrics tracking setup (Integration Point 1) ---
 if args.trackMetrics:
