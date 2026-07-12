@@ -1,11 +1,11 @@
 """
 src/metrics.py
 
-Per-iteration metrics tracking, designed around a "modelo_data_hora" run
+Per-iteration metrics tracking, designed around a "model_date_time" run
 identifier, so that every training session (regardless of model/architecture)
 gets a unique, sortable, human-readable ID -- e.g. "dualedsr_20260710_143200".
 
-Each run produces one row in `{log_dir}/{model_name}_runs_registry.csv`
+Each run produces one row in `{log_dir}/{model_name}_args.csv`
 (the "ficha") -- one table per model, one row per run, one column per
 argument -- and one file in `{log_dir}/{run_id}_metrics.csv` with the
 per-iteration metrics (loss, PSNR, SSIM, time, RAM/GPU), appended
@@ -43,7 +43,7 @@ except ImportError:
 def save_args(args, model_name: str, log_dir: str = "metrics") -> str:
     """Given an `argparse.Namespace` (or a plain dict) of training arguments,
     generates a run_id and appends one row to
-    {log_dir}/{model_name}_runs_registry.csv -- a per-model table, with one
+    {log_dir}/{model_name}_args.csv -- a per-model table, with one
     row per run and one column per argument.
 
     Each model gets its OWN registry file (since different models have
@@ -72,7 +72,7 @@ def save_args(args, model_name: str, log_dir: str = "metrics") -> str:
     record = {"run_id": run_id, "model_name": model_name,
               "saved_at": datetime.now().isoformat(), **args_dict}
 
-    registry_path = log_dir / f"{model_name}_runs_registry.csv"
+    registry_path = log_dir / f"{model_name}_args.csv"
     row_df = pd.DataFrame([record])
     header_needed = not registry_path.exists()
     row_df.to_csv(registry_path, mode="a", index=False, header=header_needed)
@@ -81,7 +81,7 @@ def save_args(args, model_name: str, log_dir: str = "metrics") -> str:
 
 
 def get_run_args(model_name: str, run_id: str, log_dir: str = "metrics") -> dict:
-    """Looks up a single run's arguments from {model_name}_runs_registry.csv,
+    """Looks up a single run's arguments from {model_name}_args.csv,
     indexed by run_id. Returns the matching row as a dict.
 
     Raises KeyError if no run with that run_id is found for this model.
@@ -92,7 +92,7 @@ def get_run_args(model_name: str, run_id: str, log_dir: str = "metrics") -> dict
 
     match = registry[registry["run_id"] == run_id]
     if match.empty:
-        raise KeyError(f"run_id '{run_id}' not found in {model_name}_runs_registry.csv.")
+        raise KeyError(f"run_id '{run_id}' not found in {model_name}_args.csv.")
 
     return match.iloc[0].to_dict()
 
@@ -100,7 +100,7 @@ def get_run_args(model_name: str, run_id: str, log_dir: str = "metrics") -> dict
 def load_model_registry(model_name: str, log_dir: str = "metrics") -> pd.DataFrame:
     """Reads back the full registry of past runs for a given model, as a
     pandas DataFrame (one row per run, one column per argument)."""
-    registry_path = Path(log_dir) / f"{model_name}_runs_registry.csv"
+    registry_path = Path(log_dir) / f"{model_name}_args.csv"
     if not registry_path.exists():
         return pd.DataFrame()
     return pd.read_csv(registry_path)
@@ -146,11 +146,12 @@ class MetricsTracker:
         history_df = tracker.load_history()  # pandas DataFrame, for the dashboard
     """
 
-    def __init__(self, log_dir: str, run_id: str):
+    def __init__(self, log_dir: str, run_id: str, log_every: int = 50):
         self.run_id = run_id
         self.log_dir = Path(log_dir)
         self.csv_path = self.log_dir / f"{run_id}_metrics.csv"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_every = log_every
 
         self._train_start_time = None
         self._iter_start_time = None
@@ -182,7 +183,20 @@ class MetricsTracker:
 
         `extra` can carry any additional fields (e.g. model-specific losses)
         without changing this function's signature.
+
+        To keep the CSV a manageable size over long training runs, rows
+        WITHOUT any validation metric (psnr_xy, psnr_final, ssim_xy,
+        ssim_final all None) are only written every `log_every` iterations
+        (set via the constructor). Validation rows are always written,
+        regardless of `log_every`, since they are already much sparser.
+        Returns None (and writes nothing) for a skipped iteration.
         """
+        has_validation_metric = any(
+            v is not None for v in (psnr_xy, psnr_final, ssim_xy, ssim_final)
+        )
+        if not has_validation_metric and iteration % self.log_every != 0:
+            return None
+
         now = time.time()
         iter_time_sec = (now - self._iter_start_time
                           if self._iter_start_time is not None else None)

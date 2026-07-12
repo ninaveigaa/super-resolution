@@ -1,0 +1,2 @@
+run_id,iteration,epoch,learning_rate,loss_xy,loss_z,psnr_xy,psnr_final,ssim_xy,ssim_final,iter_time_sec,elapsed_total_sec,ram_mb,gpu_mem_mb,timestamp
+Wang_2023_sanity_260712_2120,2,0,,,,9.636272430419922,18.581453323364258,,,1.722036600112915,22.655999898910522,2709.467136,,1783884070.3615263
