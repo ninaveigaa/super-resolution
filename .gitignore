@@ -17,3 +17,9 @@ outputs/*
 !outputs/.gitkeep
 logs/*
 !logs/.gitkeep
+
+# Checkpoints and training outputs
+checkpoints/*
+!checkpoints/.gitkeep
+training_outputs/*
+!training_outputs/.gitkeep
