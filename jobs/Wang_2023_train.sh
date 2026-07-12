@@ -5,7 +5,7 @@
 #SBATCH -t 12:00:00
 #SBATCH -J Wang_2023_train
 #SBATCH -o /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/logs/Wang_2023_train_%j.out
-#SBATCH -e /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/Wang_2023_train_logs/%j.err
+#SBATCH -e /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/logs/Wang_2023_train_%j.err
 
 module load TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1 virtualenv/20.23.1-GCCcore-12.3.0
 source super-resolution/bin/activate
