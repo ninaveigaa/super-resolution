@@ -53,16 +53,23 @@ def build_model(model_module, model_class, model_kwargs, scale, device):
 # ---------------------------------------------------------------------------
 
 def get_args():
-    parser = argparse.ArgumentParser(description='DualTraining Training')
+    parser = argparse.ArgumentParser(description='DualEDSR Training')
 
     # Data
-    parser.add_argument('--dataset_dir',    type=str, required=True)
+    parser.add_argument('--dataset_dir',    type=str, required=True,
+                         help='Directory containing the training low_res/high_res volumes')
+    parser.add_argument('--val_dataset_dir', type=str, default=None,
+                         help='Directory containing a SEPARATE held-out low_res/high_res volume '
+                              'for validation (same filenames as --low_res/--high_res, but in this '
+                              'directory). If omitted, falls back to sampling validation cubes from '
+                              'the training volume itself -- fine for a smoke test, but not a real '
+                              'held-out validation set.')
     parser.add_argument('--checkpoint_dir', type=str, required=True)
     parser.add_argument('--model_name',     type=str, required=True)
     parser.add_argument('--low_res',    type=str, required=True,
-                         help='Filename (within dataset_dir) of the low-res volume, e.g. lr.npy')
+                         help='Filename (within dataset_dir / val_dataset_dir) of the low-res volume, e.g. lr.npy')
     parser.add_argument('--high_res',   type=str, required=True,
-                         help='Filename (within dataset_dir) of the high-res volume, e.g. hr.npy')
+                         help='Filename (within dataset_dir / val_dataset_dir) of the high-res volume, e.g. hr.npy')
 
     # Model -- kept generic on purpose. Any 2D/1D solver pair can be
     # plugged in without editing this script: point --model_module /
@@ -340,6 +347,14 @@ def main():
     # Data
     lr_data, hr_data = load_data(args.dataset_dir, args.low_res, args.high_res)
 
+    if args.val_dataset_dir:
+        val_lr_data, val_hr_data = load_data(args.val_dataset_dir, args.low_res, args.high_res)
+    else:
+        print('WARNING: --val_dataset_dir not given -- validation cubes will be sampled '
+              'from the TRAINING volume (no real held-out set). Pass --val_dataset_dir '
+              'to validate on a separate volume.')
+        val_lr_data, val_hr_data = lr_data, hr_data
+
     train_dataset = VolumeDataset(
         lr_data, hr_data, args.bc_depth, args.crop_size, args.iters_per_epoch, args.scale,
     )
@@ -355,7 +370,7 @@ def main():
     # A small, separate dataset/loader for validation so val patches don't
     # collide with the training generator's state.
     val_dataset = VolumeDataset(
-        lr_data, hr_data, args.bc_depth, args.crop_size, args.val_num, args.scale,
+        val_lr_data, val_hr_data, args.bc_depth, args.crop_size, args.val_num, args.scale,
     )
     val_loader = DataLoader(
         val_dataset,
