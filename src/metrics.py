@@ -9,7 +9,7 @@ Per-EPOCH metrics tracking (not per-iteration), organized as:
     │                                          argument (all runs of that model)
     └── metrics/
         └── {model_name}/
-            └── {run_id}_time.csv          -- one row per epoch, for that
+            └── {run_id}.csv          -- one row per epoch, for that
                                                  specific run
 
 Each epoch's row records both training and validation loss (per stage --
@@ -98,7 +98,7 @@ def load_model_registry(model_name: str, base_dir: str = "measurements") -> pd.D
 
 class MetricsTracker:
     """Logs one record per EPOCH (not per iteration) to
-    `{base_dir}/metrics/{model_name}/{run_id}_time.csv`.
+    `{base_dir}/metrics/{model_name}/{run_id}.csv`.
 
     Usage:
         run_id = save_args(args, model_name="Wang_2023")
@@ -121,7 +121,7 @@ class MetricsTracker:
     def __init__(self, model_name: str, run_id: str, base_dir: str = "measurements"):
         self.model_name = model_name
         self.run_id = run_id
-        self.csv_path = Path(base_dir) / "metrics" / model_name / f"{run_id}_time.csv"
+        self.csv_path = Path(base_dir) / "metrics" / model_name / f"{run_id}_metrics.csv"
         self.csv_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._train_start_time = None
