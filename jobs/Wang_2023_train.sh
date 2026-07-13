@@ -2,7 +2,7 @@
 #SBATCH -A NAISS2025-3-39 -p alvis
 #SBATCH -N 1
 #SBATCH --gpus-per-node=A100:1
-#SBATCH -t 03:00:00
+#SBATCH -t 20:00:00
 #SBATCH -J Wang_2023_train
 #SBATCH -o /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/logs/Wang_2023_train_%j.out
 #SBATCH -e /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/logs/Wang_2023_train_%j.err
@@ -16,8 +16,8 @@ source super-resolution/bin/activate
 mkdir -p logs metrics
 
 python pipelines/Wang_2023_runDualSRNetSlimCoupled.py \
-    --epoch 50 \
-    --itersPerEpoch 100 \
+    --epoch 500 \
+    --itersPerEpoch 300 \
     --iterCyclesPerEpoch 3 \
     --batch_size 16 \
     --fine_size 48 \
