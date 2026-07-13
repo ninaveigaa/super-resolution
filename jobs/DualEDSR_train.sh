@@ -15,7 +15,7 @@ source super-resolution-pytorch/bin/activate
 
 mkdir -p logs metrics checkpoints
 
-python pipelines/train_dualedsr.py \
+python pipelines/DualTraining.py \
     --epochs 1 \
     --iters_per_epoch 1 \
     --iter_cycles 1 \
