@@ -2,41 +2,50 @@
 Generic dual-solver training script.
 
 Trains a pair of models jointly -- a 2D solver (handling the XY plane) and
-a 1D solver (handling the Z axis) -- following the DualEDSR-style two-stage
+a 1D solver (handling the Z axis) -- following a DualEDSR-style two-stage
 architecture. This script is NOT specific to any one model: any 2D/1D
-solver pair can be plugged in (e.g. EDSR + EDSR1D). The actual model
-classes are imported and instantiated by the job submission script that
-calls this training harness, not hardcoded here.
+solver pair can be plugged in via --model_module/--model_class/--model_kwargs,
+so no solver-specific hyperparameters (e.g. feature counts, block counts)
+are hardcoded here.
 
-Usage:
-    python DualTraining.py \
-        --dataset_dir /path/to/data/ \
-        --checkpoint_dir /path/to/checkpoints/ \
-        --model_name dual_edsr \
-        --epochs 500 \
-        --iters_per_epoch 300 \
-        --iter_cycles 3 \
-        --batch_size 16 \
-        --patch_size 64 \
-        --lr 1e-4 \
-        --epoch_step 50 \
-        --scale 4 \
-        --n_feats 64 \
-        --n_resblocks 16 \
-        --save_freq 10 \
-        --val_num 5
+Data pipeline: standard PyTorch Dataset/DataLoader, ported from a numpy
+reference implementation (createTrainingCubes2). Each dataset item is a
+single random block of shape (crop_size, crop_size, bc_depth), matching
+the model's expected [Nx, Ny, Nz] input exactly -- bc_depth always ends
+up as the last axis (Nz), which is the axis the model treats as a batch
+of 2D slices internally. The model has no separate batch or channel
+dimension of its own (it adds the channel dim itself via unsqueeze), so
+--batch_size here controls gradient accumulation across samples rather
+than a literal batched forward pass.
 """
 
 import argparse
 import csv
+import importlib
+import json
 import os
 import time
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
+from torch.utils.data import DataLoader, Dataset
 
-from edsr import EDSR, EDSR1D, DualEDSR
+
+def build_model(model_module, model_class, model_kwargs, scale, device):
+    """Dynamically import and instantiate the solver-pair model.
+
+    Keeps this script agnostic to any one solver: the caller decides which
+    model class to use and what architecture-specific kwargs (feature
+    counts, block counts, etc.) it needs, passed in as a JSON string via
+    --model_kwargs, rather than those kwargs being declared as named
+    arguments in this file.
+    """
+    module = importlib.import_module(model_module)
+    cls = getattr(module, model_class)
+    kwargs = dict(model_kwargs)
+    kwargs.setdefault('scale', scale)
+    return cls(**kwargs).to(device)
 
 
 # ---------------------------------------------------------------------------
@@ -44,26 +53,47 @@ from edsr import EDSR, EDSR1D, DualEDSR
 # ---------------------------------------------------------------------------
 
 def get_args():
-    parser = argparse.ArgumentParser(description='DualEDSR Training')
+    parser = argparse.ArgumentParser(description='DualTraining Training')
 
     # Data
     parser.add_argument('--dataset_dir',    type=str, required=True)
     parser.add_argument('--checkpoint_dir', type=str, required=True)
-    parser.add_argument('--model_name',     type=str, default='dual_edsr')
+    parser.add_argument('--model_name',     type=str, required=True)
+    parser.add_argument('--low_res',    type=str, required=True,
+                         help='Filename (within dataset_dir) of the low-res volume, e.g. lr.npy')
+    parser.add_argument('--high_res',   type=str, required=True,
+                         help='Filename (within dataset_dir) of the high-res volume, e.g. hr.npy')
+
+    # Model -- kept generic on purpose. Any 2D/1D solver pair can be
+    # plugged in without editing this script: point --model_module /
+    # --model_class at the class to instantiate, and pass whatever
+    # architecture-specific hyperparameters it needs (feature counts,
+    # block counts, etc.) as a JSON object via --model_kwargs.
+    parser.add_argument('--model_module', type=str, default='edsr',
+                         help='Python module to import the model class from')
+    parser.add_argument('--model_class',  type=str, default='DualEDSR',
+                         help='Name of the model class within model_module')
+    parser.add_argument('--model_kwargs', type=json.loads, default='{}',
+                         help='JSON object of kwargs to pass to the model constructor, '
+                              'e.g. \'{"n_feats": 64, "n_resblocks": 16}\'')
 
     # Training
     parser.add_argument('--epochs',          type=int,   default=500)
     parser.add_argument('--iters_per_epoch', type=int,   default=300)
     parser.add_argument('--iter_cycles',     type=int,   default=3)
-    parser.add_argument('--batch_size',      type=int,   default=16)
-    parser.add_argument('--patch_size',      type=int,   default=64)
+    parser.add_argument('--batch_size',      type=int,   default=4,
+                         help='Number of sampled volumes to average gradients over per '
+                              'optimizer step (the model takes one volume per forward call, '
+                              'so this is gradient accumulation, not a literal batched forward)')
+    parser.add_argument('--bc_depth',        type=int,   default=16,
+                         help='Depth along the axis that gets folded into the model\'s '
+                              'batch/channel dimension (was "batchsize" in the numpy version)')
+    parser.add_argument('--crop_size',       type=int,   default=64,
+                         help='Side length of the 2D spatial crop (was "cropsize" in the numpy version)')
     parser.add_argument('--lr',              type=float, default=1e-4)
     parser.add_argument('--epoch_step',      type=int,   default=50)
     parser.add_argument('--scale',           type=int,   default=4)
-
-    # Model
-    parser.add_argument('--n_feats',     type=int, default=64)
-    parser.add_argument('--n_resblocks', type=int, default=16)
+    parser.add_argument('--num_workers',     type=int,   default=4)
 
     # Logging
     parser.add_argument('--save_freq', type=int, default=10)
@@ -73,77 +103,117 @@ def get_args():
 
 
 # ---------------------------------------------------------------------------
-# Data
+# Data loading
 # ---------------------------------------------------------------------------
 
-def load_data(dataset_dir):
-    lr = np.load(os.path.join(dataset_dir, 'LR', 'LR.npy'))
-    hr = np.load(os.path.join(dataset_dir, 'HR', 'HR.npy'))
-    print(f'LR shape: {lr.shape}')
-    print(f'HR shape: {hr.shape}')
+def load_data(dataset_dir, low_res_name, high_res_name):
+    """Load the LR/HR volumes as numpy arrays.
+
+    Expects .npy files. Swap this out if your volumes live in another
+    format (e.g. raw binary, HDF5, DICOM series).
+    """
+    lr_path = os.path.join(dataset_dir, low_res_name)
+    hr_path = os.path.join(dataset_dir, high_res_name)
+    lr = np.load(lr_path).astype('float32')
+    hr = np.load(hr_path).astype('float32')
     return lr, hr
 
 
-def create_training_batches(lr, hr, batch_size, patch_size, iters_per_epoch, scale):
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+
+class VolumeDataset(Dataset):
+    """Yields one random (LR, HR) block per __getitem__, ported from the
+    numpy `createTrainingCubes2` reference implementation -- reshaped to
+    match DualEDSR.forward's expected [Nx, Ny, Nz] input exactly.
+
+    Each item is a block with two distinct axis roles:
+      - `crop_size`  -- the true 2D spatial crop (the first two returned
+                        axes, Nx and Ny).
+      - `bc_depth`   -- depth along whichever physical axis is currently
+                        playing the "batch of Z-slices" role (always
+                        returned as the last axis, Nz, since that's the
+                        axis DualEDSR.forward slices along internally via
+                        `x_lr.permute(2, 0, 1)`).
+    No channel dimension is added here -- the model adds it itself via
+    `.unsqueeze(1)`.
+
+    Orientation cycles through which physical axis plays the bc_depth
+    role across successive indices (idx % 3), giving the 2D+1D solver
+    pair exposure to the volume from all three directions.
+
+    `__len__` is `iters_per_epoch` (or `val_num` for the validation
+    dataset) -- since sampling is random, this is a "virtual" epoch
+    length rather than a real dataset size.
     """
-    Extracts random patches from the LR/HR volumes, cycling through
-    XY, YZ and XZ orientations (as in the original TF implementation).
 
-    Returns:
-        batch_lr : [iters_per_epoch * batch_size, patch_size, patch_size]
-        batch_hr : [iters_per_epoch * batch_size * scale, patch_size * scale, patch_size * scale]
-    """
-    total_lr = iters_per_epoch * batch_size
-    total_hr = iters_per_epoch * batch_size * scale
+    def __init__(self, low_res, high_res, bc_depth, crop_size, iters_per_epoch, scale):
+        self.lr = low_res
+        self.hr = high_res
+        self.bc_depth = bc_depth
+        self.crop_size = crop_size
+        self.iters_per_epoch = iters_per_epoch
+        self.scale = scale
 
-    batch_lr = np.zeros([total_lr, patch_size, patch_size], dtype='float32')
-    batch_hr = np.zeros([total_hr, patch_size * scale, patch_size * scale], dtype='float32')
+    def __len__(self):
+        return self.iters_per_epoch
 
-    n_lr = 0
-    n_hr = 0
+    def __getitem__(self, idx):
+        d = self.bc_depth
+        c = self.crop_size
+        s = self.scale
+        orientation = idx % 3
 
-    for i in range(iters_per_epoch):
-        orientation = i % 3
+        if orientation == 0:  # depth along physical X
+            x = np.random.randint(0, self.lr.shape[0] - d)
+            y = np.random.randint(0, self.lr.shape[1] - c)
+            z = np.random.randint(0, self.lr.shape[2] - c)
 
-        if orientation == 0:  # XY plane
-            x = np.random.randint(0, lr.shape[0] - batch_size)
-            y = np.random.randint(0, lr.shape[1] - patch_size)
-            z = np.random.randint(0, lr.shape[2] - patch_size)
-            block_lr = lr[x:x+batch_size,        y:y+patch_size,        z:z+patch_size]
-            block_hr = hr[x*scale:(x+batch_size)*scale,
-                          y*scale:(y+patch_size)*scale,
-                          z*scale:(z+patch_size)*scale]
+            block_lr = self.lr[x:x + d, y:y + c, z:z + c]
+            block_hr = self.hr[x * s:x * s + d * s,
+                                y * s:y * s + c * s,
+                                z * s:z * s + c * s]
 
-        elif orientation == 1:  # YZ plane
-            x = np.random.randint(0, lr.shape[0] - patch_size)
-            y = np.random.randint(0, lr.shape[1] - patch_size)
-            z = np.random.randint(0, lr.shape[2] - batch_size)
-            block_lr = lr[x:x+patch_size, y:y+patch_size, z:z+batch_size]
-            block_hr = hr[x*scale:(x+patch_size)*scale,
-                          y*scale:(y+patch_size)*scale,
-                          z*scale:(z+batch_size)*scale]
-            block_lr = np.transpose(block_lr, [2, 0, 1])
-            block_hr = np.transpose(block_hr, [2, 0, 1])
+            # (X_depth, Y, Z) -> (Y, Z, X_depth): depth axis moves to last
+            block_lr = np.transpose(block_lr, [1, 2, 0])
+            block_hr = np.transpose(block_hr, [1, 2, 0])
 
-        else:  # XZ plane
-            x = np.random.randint(0, lr.shape[0] - patch_size)
-            y = np.random.randint(0, lr.shape[1] - batch_size)
-            z = np.random.randint(0, lr.shape[2] - patch_size)
-            block_lr = lr[x:x+patch_size, y:y+batch_size, z:z+patch_size]
-            block_hr = hr[x*scale:(x+patch_size)*scale,
-                          y*scale:(y+batch_size)*scale,
-                          z*scale:(z+patch_size)*scale]
-            block_lr = np.transpose(block_lr, [1, 0, 2])
-            block_hr = np.transpose(block_hr, [1, 0, 2])
+        elif orientation == 1:  # depth along physical Z
+            x = np.random.randint(0, self.lr.shape[0] - c)
+            y = np.random.randint(0, self.lr.shape[1] - c)
+            z = np.random.randint(0, self.lr.shape[2] - d)
 
-        # Normalize to [-1, 1]
-        batch_lr[n_lr:n_lr+batch_size]            = block_lr / 127.5 - 1.0
-        batch_hr[n_hr:n_hr+batch_size*scale]      = block_hr / 127.5 - 1.0
+            block_lr = self.lr[x:x + c, y:y + c, z:z + d]
+            block_hr = self.hr[x * s:x * s + c * s,
+                                y * s:y * s + c * s,
+                                z * s:z * s + d * s]
+            # (X, Y, Z_depth): depth is already last, no transpose needed
 
-        n_lr += batch_size
-        n_hr += batch_size * scale
+        else:  # orientation == 2, depth along physical Y
+            x = np.random.randint(0, self.lr.shape[0] - c)
+            y = np.random.randint(0, self.lr.shape[1] - d)
+            z = np.random.randint(0, self.lr.shape[2] - c)
 
-    return batch_lr, batch_hr
+            block_lr = self.lr[x:x + c, y:y + d, z:z + c]
+            block_hr = self.hr[x * s:x * s + c * s,
+                                y * s:y * s + d * s,
+                                z * s:z * s + c * s]
+
+            # (X, Y_depth, Z) -> (X, Z, Y_depth): depth axis moves to last
+            block_lr = np.transpose(block_lr, [0, 2, 1])
+            block_hr = np.transpose(block_hr, [0, 2, 1])
+
+        # np.ascontiguousarray avoids issues with the negative-stride /
+        # non-contiguous views produced by np.transpose. Normalize to
+        # [-1, 1] as in the reference.
+        block_lr = np.ascontiguousarray(block_lr) / 127.5 - 1.0
+        block_hr = np.ascontiguousarray(block_hr) / 127.5 - 1.0
+
+        return (
+            torch.from_numpy(block_lr.astype('float32')),
+            torch.from_numpy(block_hr.astype('float32')),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -152,44 +222,67 @@ def create_training_batches(lr, hr, batch_size, patch_size, iters_per_epoch, sca
 
 def train_step(model, optimizer, lr_batch, hr_batch, device):
     """
-    lr_batch : [batch_size, patch_size, patch_size]          numpy
-    hr_batch : [batch_size*scale, patch_size*scale, patch_size*scale]  numpy
+    lr_batch : [B, Nx, Ny, Nz]        torch tensor (from DataLoader)
+    hr_batch : [B, Nx*S, Ny*S, Nz*S]  torch tensor (from DataLoader)
+
+    DualEDSR.forward takes exactly one volume [Nx, Ny, Nz] with no batch
+    dimension of its own, so we can't fold the DataLoader's batch axis
+    into a single forward call. Instead we loop over the B samples,
+    backpropagating each one's (loss / B) so gradients accumulate across
+    the batch before a single optimizer.step() -- gradient accumulation,
+    which gives --batch_size a similar effect to a real batch size (more
+    samples averaged per update) without requiring the model to support
+    batching.
     """
-    lr_vol = torch.from_numpy(lr_batch).to(device)  # [Nx, Ny, Nz]
-    hr_vol = torch.from_numpy(hr_batch).to(device)  # [Nx*S, Ny*S, Nz*S]
-
+    b = lr_batch.shape[0]
     optimizer.zero_grad()
-    sr_xy, sr_xyz = model(lr_vol)
-    loss, l_xy, l_xyz = model.compute_losses(sr_xy, sr_xyz, hr_vol)
-    loss.backward()
-    optimizer.step()
 
-    return loss.item(), l_xy.item(), l_xyz.item()
+    total_loss = total_lxy = total_lxyz = 0.0
+    for i in range(b):
+        x_lr = lr_batch[i].to(device)
+        i_hr = hr_batch[i].to(device)
+
+        sr_xy, sr_xyz = model(x_lr)
+        loss, l_xy, l_xyz = model.compute_losses(sr_xy, sr_xyz, i_hr)
+        (loss / b).backward()
+
+        total_loss += loss.item()
+        total_lxy  += l_xy.item()
+        total_lxyz += l_xyz.item()
+
+    optimizer.step()
+    return total_loss / b, total_lxy / b, total_lxyz / b
 
 
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate(model, lr_batches, hr_batches, val_num, device):
+def validate(model, val_loader, val_num, device):
     model.eval()
     psnr_xy_total  = 0.0
     psnr_xyz_total = 0.0
+    n = 0
 
     with torch.no_grad():
-        for i in range(min(val_num, len(lr_batches))):
-            lr_vol = torch.from_numpy(lr_batches[i]).to(device)
-            hr_vol = torch.from_numpy(hr_batches[i]).to(device)
+        for i, (lr_batch, hr_batch) in enumerate(val_loader):
+            if i >= val_num:
+                break
 
-            sr_xy, sr_xyz = model(lr_vol)
+            # val_loader uses batch_size=1, so index [0] to get the single
+            # [Nx,Ny,Nz] volume DualEDSR.forward expects.
+            x_lr = lr_batch[0].to(device)
+            i_hr = hr_batch[0].to(device)
+
+            sr_xy, sr_xyz = model(x_lr)
 
             # Intermediate target: HR downsampled in Z
             Nz  = sr_xy.shape[0]
             NxS = sr_xy.shape[2]
             NyS = sr_xy.shape[3]
-            NzS = hr_vol.shape[2]
+            NzS = i_hr.shape[2]
             tmp = (
-                hr_vol.permute(2, 0, 1)
+                i_hr.permute(2, 0, 1)
                 .reshape(NzS, NxS * NyS)
                 .permute(1, 0).unsqueeze(0)
             )
@@ -198,15 +291,16 @@ def validate(model, lr_batches, hr_batches, val_num, device):
 
             # PSNR (data range = 2.0 for [-1, 1])
             mse_xy  = F.mse_loss(sr_xy.squeeze(1), hr_d).item()
-            mse_xyz = F.mse_loss(sr_xyz, hr_vol).item()
+            mse_xyz = F.mse_loss(sr_xyz, i_hr).item()
             psnr_xy  = 10 * np.log10(4.0 / (mse_xy  + 1e-8))
             psnr_xyz = 10 * np.log10(4.0 / (mse_xyz + 1e-8))
 
             psnr_xy_total  += psnr_xy
             psnr_xyz_total += psnr_xyz
+            n += 1
 
     model.train()
-    n = min(val_num, len(lr_batches))
+    n = max(n, 1)
     return psnr_xy_total / n, psnr_xyz_total / n
 
 
@@ -234,18 +328,41 @@ def main():
             'psnr_xy', 'psnr_xyz',
         ])
 
-    # Model
-    model = DualEDSR(
-        n_feats=args.n_feats,
-        n_resblocks=args.n_resblocks,
-        scale=args.scale,
-    ).to(device)
-    print(f'Parameters: {sum(p.numel() for p in model.parameters()):,}')
+    # Model -- dynamically loaded so this script isn't tied to one solver.
+    model = build_model(
+        args.model_module, args.model_class, args.model_kwargs, args.scale, device,
+    )
+    print(f'Model: {args.model_module}.{args.model_class} | '
+          f'Parameters: {sum(p.numel() for p in model.parameters()):,}')
 
     optimizer = Adam(model.parameters(), lr=args.lr)
 
     # Data
-    lr_data, hr_data = load_data(args.dataset_dir)
+    lr_data, hr_data = load_data(args.dataset_dir, args.low_res, args.high_res)
+
+    train_dataset = VolumeDataset(
+        lr_data, hr_data, args.bc_depth, args.crop_size, args.iters_per_epoch, args.scale,
+    )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        drop_last=True,
+        persistent_workers=args.num_workers > 0,
+    )
+
+    # A small, separate dataset/loader for validation so val patches don't
+    # collide with the training generator's state.
+    val_dataset = VolumeDataset(
+        lr_data, hr_data, args.bc_depth, args.crop_size, args.val_num, args.scale,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=0,
+    )
 
     # Training loop
     start_time = time.time()
@@ -257,24 +374,13 @@ def main():
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr
 
-        # Build batches for this epoch
-        batch_lr, batch_hr = create_training_batches(
-            lr_data, hr_data,
-            args.batch_size, args.patch_size,
-            args.iters_per_epoch, args.scale,
-        )
-
-        # Training iterations
         total_loss = 0.0
         total_lxy  = 0.0
         total_lxyz = 0.0
         n_iters = 0
 
         for cycle in range(args.iter_cycles):
-            for i in range(args.iters_per_epoch):
-                lr_batch = batch_lr[i*args.batch_size : (i+1)*args.batch_size]
-                hr_batch = batch_hr[i*args.batch_size*args.scale : (i+1)*args.batch_size*args.scale]
-
+            for lr_batch, hr_batch in train_loader:
                 loss, l_xy, l_xyz = train_step(model, optimizer, lr_batch, hr_batch, device)
 
                 total_loss += loss
@@ -304,13 +410,7 @@ def main():
         # Validation
         psnr_xy, psnr_xyz = None, None
         if (epoch + 1) % args.save_freq == 0 or epoch == 0:
-            # Build small validation set from the same batch
-            val_lr = [batch_lr[i*args.batch_size:(i+1)*args.batch_size]
-                      for i in range(min(args.val_num, args.iters_per_epoch))]
-            val_hr = [batch_hr[i*args.batch_size*args.scale:(i+1)*args.batch_size*args.scale]
-                      for i in range(min(args.val_num, args.iters_per_epoch))]
-
-            psnr_xy, psnr_xyz = validate(model, val_lr, val_hr, args.val_num, device)
+            psnr_xy, psnr_xyz = validate(model, val_loader, args.val_num, device)
             print(f'Validation — PSNR-xy {psnr_xy:.2f} dB | PSNR-xyz {psnr_xyz:.2f} dB')
 
             # Save checkpoint

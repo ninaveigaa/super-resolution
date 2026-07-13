@@ -21,19 +21,21 @@ Every transformation below:
        path; an explicit output_path is required when chaining from an
        in-memory array, since there is no original filename to derive
        a default from).
+
     3. ALWAYS returns the transformed array itself (not the output path),
        so it can be passed directly into the next function in a chain.
 """
 
 from pathlib import Path
-
 import numpy as np
 import tifffile
 
 
 # ---------------------------------------------------------------------------
-# Internal: file format registry (extensible -- add new formats here)
+# Internal: file format registry
 # ---------------------------------------------------------------------------
+
+
 _LOADERS = {
     ".npy": lambda p: np.load(p),
     ".tif": lambda p: tifffile.imread(p),
@@ -46,8 +48,14 @@ _SAVERS = {
     ".tiff": lambda p, arr: tifffile.imwrite(p, arr),
 }
 
+# _LOADERS and _SAVERS are dispatch dictionaries. A if, elif, else function created under def would be the tradtional way to do the same as them. 
+# lambda args is a way to create nameless simple functions on python. After the ":" is the function body, which must contain the args as input. 
 
 def _load_any(path) -> np.ndarray:
+    """
+    The existance of the underscore in the function name indicates that it is an internal function, not meant to be used outside of this module.
+    This function returns the correct loader function based on the file extension of the path provided and what was previously defined in the _LOADERS dictionary. If the file extension is not supported, it raises a ValueError.
+    """
     path = Path(path)
     ext = path.suffix.lower()
     if ext not in _LOADERS:
@@ -56,6 +64,10 @@ def _load_any(path) -> np.ndarray:
 
 
 def _save_any(path, array: np.ndarray):
+    """
+    The existance of the underscore in the function name indicates that it is an internal function, not meant to be used outside of this module.
+    This function returns the correct saver function based on the file extension of the path provided and what was previously defined in the _SAVERS dictionary. If the file extension is not supported, it raises a ValueError.
+    """
     path = Path(path)
     ext = path.suffix.lower()
     if ext not in _SAVERS:
