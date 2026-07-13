@@ -30,13 +30,11 @@ from src import metrics
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 print(tf.__version__)
 
-# --- NEW: argparse replaces the original dualSRNetArgs.args() ---
 args = Wang_2023_dualSRNetArgs.args()
 
-# --- NEW: metrics tracking setup (Integration Point 1) ---
 if args.metricsTracker:
-    run_id = metrics.save_args(args, model_name=args.modelName, log_dir="metrics")
-    tracker = metrics.MetricsTracker(log_dir="metrics", run_id=run_id)
+    run_id = metrics.save_args(args, model_name=args.modelName)
+    tracker = metrics.MetricsTracker(model_name=args.modelName, run_id=run_id)
     tracker.start_training()
     print(f"[metrics] Tracking enabled. run_id = {run_id}")
 
@@ -60,20 +58,6 @@ print('Variable dtype: %s' % policy.variable_dtype)
 # detect hardware
 if args.numGPUs <= 1:
     device = "/gpu:0" if args.numGPUs == 1 else "/cpu:0"
-
-    # Safeguard: if a GPU was requested (numGPUs >= 1) but TensorFlow can't
-    # actually see one, abort now instead of silently training on CPU for
-    # hours (which is what happened before -- ~3.8s/iteration, eventually
-    # killed by Alvis's idle-GPU job monitor).
-    if args.numGPUs == 1 and len(tf.config.list_physical_devices('GPU')) == 0:
-        raise RuntimeError(
-            "Requested 1 GPU (--gpuIDs) but TensorFlow detected 0 physical "
-            "GPU devices. This usually means the node's CUDA driver is "
-            "unavailable (see CUDA_ERROR_NO_DEVICE in the logs). Aborting "
-            "instead of silently falling back to CPU -- resubmit the job "
-            "to get allocated a different node."
-        )
-
     strategy = tf.distribute.OneDeviceStrategy(device=device)
 else:
     #strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
@@ -578,13 +562,13 @@ with strategy.scope():
             gradDsrXY = tape.gradient(totalDsrXYLossScal, discriminatorSR.trainable_variables)
             gradDsrYZ = tape.gradient(totalDsrYZLossScal, discriminatorSRC.trainable_variables)
             
-# get unscaled gradients
+	# get unscaled gradients
         unsc_gradGsr = optimizerGeneratorSR.get_unscaled_gradients(gradGsr)
         unsc_gradGsrc = optimizerGeneratorSRC.get_unscaled_gradients(gradGsrc)
         if args.ganFlag:
             unsc_gradDsrXY = optimizerDiscriminatorSR.get_unscaled_gradients(gradDsrXY)
             unsc_gradDsrYZ = optimizerDiscriminatorSRC.get_unscaled_gradients(gradDsrYZ)
-
+	
         # apply gradients
         optimizerGeneratorSR.apply_gradients(zip(unsc_gradGsr,generatorSR.trainable_variables))
         optimizerGeneratorSRC.apply_gradients(zip(unsc_gradGsrc,generatorSRC.trainable_variables))
@@ -719,10 +703,6 @@ with strategy.scope():
                 for x, y in zip(HR_dataset, LR_dataset):
                     num_batches += 1
 
-                    # --- NEW: Integration Point 2 (start timing this iteration) ---
-                    if args.metricsTracker:
-                        tracker.start_iteration()
-
                     GABL, GBAL, ADVXYSRL, DXYSRL, ADVYZSRL, DYZSRL = distributed_train_step(x, y)
                     totGABL += GABL
                     totGBAL += GBAL
@@ -731,14 +711,6 @@ with strategy.scope():
                     totADVYZSRL += ADVYZSRL
                     totDYZSRL += DYZSRL
                     currentTime=time.time()
-
-                    # --- NEW: Integration Point 2 (log loss for this iteration) ---
-                    if args.metricsTracker:
-                        tracker.log_iteration(
-                            num_batches,
-                            loss_xy=float(GABL), loss_z=float(GBAL),
-                            epoch=epoch, learning_rate=lr,
-                        )
 
                     stdout.write("\rEpoch: %4d, Iter: %4d, Time: %4.4f, Speed: %4.4f its/s, GSRxyL: %4.4f, GSRyzL: %4.4f, advSRxyL: %4.4f, advSRyzL: %4.4f, DSRxyL: %4.4f, DSRyzL: %4.4f" % (epoch+1, num_batches, currentTime-start_time, 1/(currentTime-lastTime), GABL, GBAL, ADVXYSRL, ADVYZSRL, DXYSRL, DYZSRL))
                     stdout.flush()
@@ -753,50 +725,65 @@ with strategy.scope():
             totADVYZSRL /= num_batches
             totDYZSRL /= num_batches
             print('Mean Epoch Performance: GSRxyL: %4.4f, GSRyzL: %4.4f, advSRxyL: %4.4f, advSRyzL: %4.4f, DSRxyL: %4.4f, DSRyzL: %4.4f' % (totGABL, totGBAL, totADVXYSRL, totADVYZSRL, totDXYSRL, totDYZSRL))
-            
-            if np.mod(epoch+1, args.print_freq) == 0 or epoch == 0:
-                # validation LOOP
 
-                valPSNRC=0.0
-                valPSNRCC=0.0
-                
-                numTestBatches=0
+            # Metrics validation (loss, PSNR, SSIM) now runs EVERY epoch.
+            # Saving example .tif images stays on the print_freq schedule
+            # (that's a disk-I/O concern, separate from metrics tracking).
+            saveImagesThisEpoch = np.mod(epoch+1, args.print_freq) == 0 or epoch == 0
+
+            valPSNRC=0.0
+            valPSNRCC=0.0
+            valSSIMC=0.0
+            valSSIMCC=0.0
+            valLossC=0.0
+            valLossCC=0.0
+
+            numTestBatches=0
+            if saveImagesThisEpoch:
                 os.mkdir(f'./{trainOutputDir}/epoch-{epoch+1}/')
 
-                for C, B in zip(HR_dataset_test, LR_dataset_test):
+            for C, B in zip(HR_dataset_test, LR_dataset_test):
 
-                    #B = BC[0][1]
-                    #C = BC[0][0]
+                #B = BC[0][1]
+                #C = BC[0][0]
 
-                    Cd = tf.image.resize(tf.squeeze(C),[C.shape[0]//args.scale,C.shape[2]],method='bicubic')
-                    Cd=tf.expand_dims(Cd,3)
-                    Co = np.asarray(Cd)
-                    fakeC = generatorSR(B, training=False)
-                    fakeCo = np.asarray(fakeC)
-                    
-                    psnrC=tf.image.psnr(fakeC,Cd,2)
-                    # set bit depth to 8 for SRxy
-                    fakeC=(fakeC+1)*127.5
-                    fakeC=tf.math.round(fakeC)
-                    fakeC=fakeC/127.5 - 1
-                    # transpose and downsample here
-                    fakeC = tf.transpose(fakeC,[1,0,2,3])
-                    B = tf.transpose(B,[1,0,2,3])
-                    C = tf.transpose(C,[1,0,2,3])
-                    #fakeC=tf.image.resize(fakeC,[fakeC.shape[1],fakeC.shape[2]//args.scale],method='bicubic')
-                    fakeC_clean = generatorSRC(fakeC, training=False)
-                    psnrCC=tf.image.psnr(fakeC_clean,C,2)
-                    
-                    B = np.asarray(B)
-                    C = np.asarray(C)
-                    fakeC = np.asarray(fakeC)
-                    fakeC_clean = np.asarray(fakeC_clean)
+                Cd = tf.image.resize(tf.squeeze(C),[C.shape[0]//args.scale,C.shape[2]],method='bicubic')
+                Cd=tf.expand_dims(Cd,3)
+                Co = np.asarray(Cd)
+                fakeC = generatorSR(B, training=False)
+                fakeCo = np.asarray(fakeC)
+                
+                psnrC=tf.image.psnr(fakeC,Cd,2)
+                ssimC=tf.image.ssim(fakeC,Cd,2)
+                lossC=tf.reduce_mean(tf.abs(fakeC-Cd))
+                # set bit depth to 8 for SRxy
+                fakeC=(fakeC+1)*127.5
+                fakeC=tf.math.round(fakeC)
+                fakeC=fakeC/127.5 - 1
+                # transpose and downsample here
+                fakeC = tf.transpose(fakeC,[1,0,2,3])
+                B = tf.transpose(B,[1,0,2,3])
+                C = tf.transpose(C,[1,0,2,3])
+                #fakeC=tf.image.resize(fakeC,[fakeC.shape[1],fakeC.shape[2]//args.scale],method='bicubic')
+                fakeC_clean = generatorSRC(fakeC, training=False)
+                psnrCC=tf.image.psnr(fakeC_clean,C,2)
+                ssimCC=tf.image.ssim(fakeC_clean,C,2)
+                lossCC=tf.reduce_mean(tf.abs(fakeC_clean-C))
+                
+                B = np.asarray(B)
+                C = np.asarray(C)
+                fakeC = np.asarray(fakeC)
+                fakeC_clean = np.asarray(fakeC_clean)
 
-                    valPSNRC += np.mean(psnrC)
-                    valPSNRCC += np.mean(psnrCC)
-                    numTestBatches += 1
+                valPSNRC += np.mean(psnrC)
+                valPSNRCC += np.mean(psnrCC)
+                valSSIMC += np.mean(ssimC)
+                valSSIMCC += np.mean(ssimCC)
+                valLossC += float(lossC)
+                valLossCC += float(lossCC)
+                numTestBatches += 1
 
-                    
+                if saveImagesThisEpoch:
                     image_path = f'./{trainOutputDir}/epoch-{epoch+1}/{numTestBatches}-Bxy.tif'
                     B=(B+1)*127.5
                     tifffile.imwrite(image_path, np.array(np.squeeze(B.astype('uint8')), dtype='uint8'))
@@ -822,28 +809,35 @@ with strategy.scope():
                     tifffile.imwrite(image_path, np.array(np.squeeze(fakeC_clean.astype('uint8')), dtype='uint8'))
                         
 
-                    
-                    stdout.write("\rIter: %4d, Test: PSNR-SR: %4.4f, PSNR-SRC: %4.4f" %(numTestBatches, np.mean(psnrC), np.mean(psnrCC)))
-                    stdout.flush()
-                    if numTestBatches == args.valNum:
-                        break
-
-                valPSNRC /= numTestBatches
-                valPSNRCC /= numTestBatches
-
-                # --- NEW: Integration Point 3 (log validation PSNR, reusing the
-                # CURRENT iteration count -- num_batches -- not None; see the
-                # discussion on why iteration must stay non-null for plotting) ---
-                if args.metricsTracker:
-                    tracker.log_iteration(
-                        num_batches, epoch=epoch,
-                        psnr_xy=float(valPSNRC), psnr_final=float(valPSNRCC),
-                    )
-
-                stdout.write("\n")
-                print(f'Mean Validation PSNR-SR: {valPSNRC}, PSNR-SRC: {valPSNRCC}')
                 
-                if args.valTest:
+                stdout.write("\rIter: %4d, Test: PSNR-SR: %4.4f, PSNR-SRC: %4.4f" %(numTestBatches, np.mean(psnrC), np.mean(psnrCC)))
+                stdout.flush()
+                if numTestBatches == args.valNum:
+                    break
+
+            valPSNRC /= numTestBatches
+            valPSNRCC /= numTestBatches
+            valSSIMC /= numTestBatches
+            valSSIMCC /= numTestBatches
+            valLossC /= numTestBatches
+            valLossCC /= numTestBatches
+
+            # Log everything for this epoch in a SINGLE row: training loss
+            # (already computed above as totGABL/totGBAL), validation loss,
+            # PSNR, and SSIM -- all per stage (xy / final).
+            if args.metricsTracker:
+                tracker.log_epoch(
+                    epoch,
+                    train_loss_xy=float(totGABL), train_loss_z=float(totGBAL),
+                    val_loss_xy=float(valLossC), val_loss_z=float(valLossCC),
+                    psnr_xy=float(valPSNRC), psnr_final=float(valPSNRCC),
+                    ssim_xy=float(valSSIMC), ssim_final=float(valSSIMCC),
+                )
+
+            stdout.write("\n")
+            print(f'Mean Validation PSNR-SR: {valPSNRC}, PSNR-SRC: {valPSNRCC}, SSIM-SR: {valSSIMC}, SSIM-SRC: {valSSIMCC}, Loss-SR: {valLossC}, Loss-SRC: {valLossCC}')
+            
+            if args.valTest and saveImagesThisEpoch:
                     print(f'Generating some test cubes')
                     testSRxy=generatorSR(LRTest)
                     testSRxy = np.asarray(testSRxy)
