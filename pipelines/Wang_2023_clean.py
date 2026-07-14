@@ -11,14 +11,14 @@ import os
 from glob import glob
 import time
 import datetime
-from configs import Wang_2023_args_clean
-import metrics
+from configs import Wang_2023_clean_args
+from src import metrics
 
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 print(tf.__version__)
 
-args = Wang_2023_args_clean.args()  # args is global
+args = Wang_2023_clean_args.args()  # args is global
 
 gpuList = args.gpuIDs
 args.numGPUs = len(gpuList.split(','))
@@ -436,7 +436,7 @@ def distributed_train_step(HRBatch, BCBatch):
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------
-trainingDir = f"./{args.checkpoint_dir}/{args.modelName}/"
+trainingDir = os.path.join(args.checkpoint_dir, args.modelName) + "/"
 
 if args.phase == 'train':
     EPOCHS = args.epoch
