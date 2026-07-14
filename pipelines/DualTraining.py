@@ -97,6 +97,12 @@ def get_args():
                               'batch/channel dimension (was "batchsize" in the numpy version)')
     parser.add_argument('--crop_size',       type=int,   default=64,
                          help='Side length of the 2D spatial crop (was "cropsize" in the numpy version)')
+    parser.add_argument('--val_bc_depth',    type=int,   default=None,
+                         help='bc_depth to use for validation cubes, if the validation volume is '
+                              'smaller than the training volume along some axis. Defaults to --bc_depth.')
+    parser.add_argument('--val_crop_size',   type=int,   default=None,
+                         help='crop_size to use for validation cubes, if the validation volume is '
+                              'smaller than the training volume along some axis. Defaults to --crop_size.')
     parser.add_argument('--lr',              type=float, default=1e-4)
     parser.add_argument('--epoch_step',      type=int,   default=50)
     parser.add_argument('--scale',           type=int,   default=4)
@@ -369,8 +375,10 @@ def main():
 
     # A small, separate dataset/loader for validation so val patches don't
     # collide with the training generator's state.
+    val_bc_depth = args.val_bc_depth if args.val_bc_depth is not None else args.bc_depth
+    val_crop_size = args.val_crop_size if args.val_crop_size is not None else args.crop_size
     val_dataset = VolumeDataset(
-        val_lr_data, val_hr_data, args.bc_depth, args.crop_size, args.val_num, args.scale,
+        val_lr_data, val_hr_data, val_bc_depth, val_crop_size, args.val_num, args.scale,
     )
     val_loader = DataLoader(
         val_dataset,
