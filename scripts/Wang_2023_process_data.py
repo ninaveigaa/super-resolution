@@ -1,34 +1,17 @@
 """
 scripts/Wang_2023_process_data.py
 
-Full data preparation pipeline for DualEDSR (TensorFlow) training, using the
-chainable functions in src/preprocessing.py, followed by an automatic export
-of the final files back to .tif for visual inspection.
+Full data preparation pipeline for DualEDSR training.
 
-Pipeline (per file, LR and HR independently):
+Pipeline:
 
     raw .tiff (uint16), loaded as [Z, Y, X] by tifffile
-        --> transpose: [Z, Y, X] -> [Y, X, Z] (Z last, matching the article's
-            [Nx, Ny, Nz] convention -- see Milestone 2)
+        --> transpose: [Z, Y, X] -> [Y, X, Z] 
         --> convert_ftype: .tiff -> .npy
         --> convert_dtype: uint16 -> uint8
-        --> cubic_interpolation: LR ONLY, voxel-size correction (4.2um -> 2.8um)
-        --> center_crop: to the article's target training dimensions
-        --> splitting: 80% train / 20% validation (LAST step)
-
-Final output, matching the layout expected by the training script:
-
-    data/processed/dualedsr_tf/training/LR/LR.npy
-    data/processed/dualedsr_tf/training/HR/HR.npy
-    data/processed/dualedsr_tf/validation/LR/LR.npy
-    data/processed/dualedsr_tf/validation/HR/HR.npy
-
-...plus a visual-inspection export (always run, right after the pipeline):
-
-    data/processed/dualedsr_tf/visual_check/training_LR.tif
-    data/processed/dualedsr_tf/visual_check/training_HR.tif
-    data/processed/dualedsr_tf/visual_check/validation_LR.tif
-    data/processed/dualedsr_tf/visual_check/validation_HR.tif
+        --> cubic_interpolation: voxel-size correction
+        --> center_crop: crop to target shape, considering the center of the volume
+        --> splitting: 80% train / 20% validation 
 
 Usage (from the repo root):
     python scripts/Wang_2023_process_data.py
@@ -78,16 +61,12 @@ def prepare_data():
     assert HR_RAW.exists(), f"HR raw file not found: {HR_RAW} (run scripts/Wang_2023_load_raw_data.sh first)"
 
     # -----------------------------------------------------------------
-    # LR: full chain, including the voxel-size correction (cubic_interpolation)
+    # LR: full chain, including the voxel-size correction
     # -----------------------------------------------------------------
     section("Processing LR (ffov_crop_origsize.tiff)")
     lr_npy = preprocessing.convert_ftype(LR_RAW, "npy", output_path=OUT_DIR / "_steps" / "LR_01_npy.npy")
     print(f"  1. .tiff -> .npy:        {lr_npy.shape}, {lr_npy.dtype}")
 
-    # tifffile loads TIFF stacks as [Z, Y, X] (Z/slices always first).
-    # Our pipeline assumes Z LAST (matching the article's [Nx, Ny, Nz]
-    # convention), so we transpose right after loading, before any
-    # crop/upsample step -- otherwise crops target the wrong axis entirely.
     lr_npy = preprocessing.TrackedArray(lr_npy.transpose(1, 2, 0), source_path=lr_npy.source_path)
     print(f"     (transposed [Z,Y,X] -> [Y,X,Z]): {lr_npy.shape}")
 
@@ -107,8 +86,7 @@ def prepare_data():
     print(f"  4. center_crop:          {lr_cropped.shape}  (target: {LR_TARGET_SHAPE})")
 
     # -----------------------------------------------------------------
-    # HR: same chain, but WITHOUT the interpolation step (already at
-    # the correct resolution, per Milestone 2)
+    # HR: same chain, but WITHOUT the interpolation step
     # -----------------------------------------------------------------
     section("Processing HR (PEFC_hres_0p7um.tiff)")
     hr_npy = preprocessing.convert_ftype(HR_RAW, "npy", output_path=OUT_DIR / "_steps" / "HR_01_npy.npy")
@@ -139,9 +117,9 @@ def prepare_data():
     print(f"  HR train: {hr_split['train'].shape}  |  HR validation: {hr_split['validation'].shape}")
 
     # -----------------------------------------------------------------
-    # Final save -- exact filenames/layout expected by the training script
+    # Final save
     # -----------------------------------------------------------------
-    section("Saving final files (layout expected by the training script)")
+    section("Saving final files")
     final_paths = {
         OUT_DIR / "training" / "LR" / "LR.npy": lr_split["train"],
         OUT_DIR / "training" / "HR" / "HR.npy": hr_split["train"],
@@ -161,7 +139,7 @@ def prepare_data():
 
 def export_for_visual_check(final_paths):
     """Converts the final prepared .npy files back to .tif, for visual
-    inspection in an image viewer (ImageJ/Fiji, napari, etc.)."""
+    inspection"""
     section("Exporting final files to .tif for visual inspection")
 
     for npy_path in final_paths:
@@ -169,15 +147,9 @@ def export_for_visual_check(final_paths):
             print(f"[SKIPPED] {npy_path} not found.")
             continue
 
-        # e.g. training/LR/LR.npy -> visual_check/training_LR.tif
         tag = f"{npy_path.parent.parent.name}_{npy_path.parent.name}"
         output_path = VISUAL_CHECK_DIR / f"{tag}.tif"
 
-        # Our pipeline stores volumes as [Y, X, Z] (Z last). tifffile treats
-        # the FIRST axis as the page/slice axis when writing, so we transpose
-        # back to [Z, Y, X] here -- otherwise Preview/Fiji would scroll
-        # through the wrong axis (Y instead of the physically meaningful
-        # Z/depth axis).
         volume = np.load(npy_path)
         volume_zyx = volume.transpose(2, 0, 1)
         output_path.parent.mkdir(parents=True, exist_ok=True)
