@@ -29,13 +29,6 @@ import psutil
 
 def generate_run_id(model_name: str, timestamp: datetime = None) -> str:
     """Builds a unique, sortable run identifier: '{model_name}_{YYMMDD_HHMM}'.
-
-    NOTE: at minute-level granularity (no seconds), two runs of the SAME
-    model started within the same minute will collide and produce an
-    IDENTICAL run_id -- this can happen with quick back-to-back sanity-test
-    runs. If you need to guarantee uniqueness across rapid successive runs,
-    check load_model_registry() for an existing run_id before relying on
-    this one being unique.
     """
     timestamp = timestamp or datetime.now()
     return f"{model_name}_{timestamp.strftime('%y%m%d_%H%M')}"
@@ -48,11 +41,6 @@ def save_args(args, model_name: str, base_dir: str = "measurements") -> str:
     run and one column per argument.
 
     Returns the generated run_id, to reuse when constructing MetricsTracker.
-
-    NOTE: if different runs of the SAME model use a different SET of
-    arguments (e.g. a new hyperparameter added later), the registry CSV
-    will have missing values (NaN) for columns that didn't exist in
-    earlier/later runs -- expected and safe.
     """
     run_id = generate_run_id(model_name)
     args_dir = Path(base_dir) / "args"
@@ -99,23 +87,6 @@ def load_model_registry(model_name: str, base_dir: str = "measurements") -> pd.D
 class MetricsTracker:
     """Logs one record per EPOCH (not per iteration) to
     `{base_dir}/metrics/{model_name}/{run_id}.csv`.
-
-    Usage:
-        run_id = save_args(args, model_name="Wang_2023")
-        tracker = MetricsTracker(model_name="Wang_2023", run_id=run_id)
-        tracker.start_training()
-
-        for epoch in range(total_epochs):
-            ... train the epoch, validate the epoch ...
-            tracker.log_epoch(
-                epoch,
-                train_loss_xy=..., train_loss_z=...,
-                val_loss_xy=..., val_loss_z=...,
-                psnr_xy=..., psnr_final=...,
-                ssim_xy=..., ssim_final=...,
-            )
-
-        history_df = tracker.load_history()  # pandas DataFrame, for the dashboard
     """
 
     def __init__(self, model_name: str, run_id: str, base_dir: str = "measurements"):
