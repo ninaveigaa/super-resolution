@@ -29,7 +29,7 @@ python pipelines/Wang_2023_runDualSRNetSlimCoupled.py \
     --ganFlag False \
     --save_freq 10 \
     --print_freq 10 \
-    --valNum 20 \
+    --valNum 225 \
     --gpuIDs 0 \
     --modelName Wang_2023 \
     --dataset_dir /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/data/processed/Wang_2023/training/ \
