@@ -19,7 +19,7 @@ python pipelines/Wang_2023_runDualSRNetSlimCoupled.py \
     --epoch 500 \
     --itersPerEpoch 300 \
     --iterCyclesPerEpoch 3 \
-    --batch_size 16 \
+    --batch_size 32 \
     --fine_size 48 \
     --lr 1e-4 \
     --epoch_step 150 \

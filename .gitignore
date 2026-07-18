@@ -9,6 +9,8 @@ lib/
 lib64
 bin/
 pyvenv.cfg
+envs/*
+!envs/.gitkeep
 
 # Data, outputs & logs
 data/*
