@@ -7,3 +7,6 @@
 [submodule "submodules/DualEDSR_TS_2026"]
 	path = submodules/DualEDSR_TS_2026
 	url = https://github.com/ninaveigaa/DualEDSR_TS_2026.git
+[submodule "EDSR-PyTorch"]
+	path = EDSR-PyTorch
+	url = https://github.com/ninaveigaa/EDSR-PyTorch.git
