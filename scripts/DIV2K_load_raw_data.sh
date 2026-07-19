@@ -1,11 +1,11 @@
 #!/bin/bash
 # Downloads and organizes the DIV2K dataset (HR + LR bicubic X4)
 # Usage: ./download_div2k.sh [destination_folder]
-# Default: ~/data/raw/DIV2K
+# Default: data/raw/DIV2K (relative to wherever you run this script from)
 
 set -e  # stop the script if any command fails
 
-DEST="${1:-$HOME/data/raw/DIV2K}"
+DEST="${1:-data/raw/DIV2K}"
 BASE_URL="https://data.vision.ee.ethz.ch/cvl/DIV2K"
 SCALE="X4"
 
