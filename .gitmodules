@@ -10,3 +10,6 @@
 [submodule "EDSR-PyTorch"]
 	path = EDSR-PyTorch
 	url = https://github.com/ninaveigaa/EDSR-PyTorch.git
+[submodule "Dual-EDSR_OG"]
+	path = Dual-EDSR_OG
+	url = https://github.com/wliangaz/Dual-EDSR.git
