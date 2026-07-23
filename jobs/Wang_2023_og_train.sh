@@ -27,5 +27,5 @@ python Dual-EDSR_OG/runDualSRNetSlimCoupled.py \
     --valNum 225 \
     --gpuIDs 0 \
     --modelName Wang_2023_og \
-    --dataset_dir /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/data/processed/Wang_2023/training_og/ \
+    --dataset_dir /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/data/processed/Wang_2023_og/training/ \
     --checkpoint_dir /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/checkpoints
