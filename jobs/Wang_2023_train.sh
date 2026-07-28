@@ -11,7 +11,7 @@ module purge
 module load TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1 virtualenv/20.23.1-GCCcore-12.3.0
 
 cd /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/
-source super-resolution/bin/activate
+source envs/super-resolution-tensorflow/bin/activate
 
 mkdir -p logs metrics
 

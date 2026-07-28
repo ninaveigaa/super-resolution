@@ -1,0 +1,21 @@
+2026-07-27 15:49:50,489 INFO    MainThread:501017 [wandb_setup.py:_flush():81] Current SDK version is 0.26.1
+2026-07-27 15:49:50,489 INFO    MainThread:501017 [wandb_setup.py:_flush():81] Configure stats pid to 501017
+2026-07-27 15:49:50,489 INFO    MainThread:501017 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-07-27 15:49:50,489 INFO    MainThread:501017 [wandb_init.py:setup_run_log_directory():723] Logging user logs to /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/wandb/wandb/offline-run-20260727_154950-s35ol7en/logs/debug.log
+2026-07-27 15:49:50,489 INFO    MainThread:501017 [wandb_init.py:setup_run_log_directory():724] Logging internal logs to /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/wandb/wandb/offline-run-20260727_154950-s35ol7en/logs/debug-internal.log
+2026-07-27 15:49:50,490 INFO    MainThread:501017 [wandb_init.py:init():850] calling init triggers
+2026-07-27 15:49:50,490 INFO    MainThread:501017 [wandb_init.py:init():855] wandb.init called with sweep_config: {}
+config: {'mixedPrecision': False, 'gpuIDs': '0', 'dataset_dir': '/mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/data/processed/Wang_2023_og/training/', 'augFlag': False, 'scale': 4, 'batch_size': 32, 'subBlocks': 4, 'fine_size': 48, 'epoch': 500, 'itersPerEpoch': 300, 'iterCyclesPerEpoch': 3, 'valNum': 225, 'valTest': False, 'ngsrf': 64, 'numResBlocks': 16, 'ganFlag': False, 'ndsrf': 64, 'srAdv_lambda': 0.01, 'disc_size': 64, 'lr': 0.0001, 'epoch_step': 150, 'phase': 'train', 'save_freq': 10, 'print_freq': 10, 'continue_train': False, 'continueEpoch': 0, 'checkpoint_dir': '/mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/checkpoints', 'modelName': 'Wang_2023_og', 'test_dir': '/media/user/SSD2/testLR/', 'test_temp_save_dir': '/media/user/SSD2/', 'test_save_dir': '/media/user/SSD2/', '_wandb': {}}
+2026-07-27 15:49:50,490 INFO    MainThread:501017 [wandb_init.py:init():898] starting backend
+2026-07-27 15:49:50,980 INFO    MainThread:501017 [wandb_init.py:init():913] sending inform_init request
+2026-07-27 15:49:51,671 INFO    MainThread:501017 [wandb_init.py:init():918] backend started and connected
+2026-07-27 15:49:51,711 INFO    MainThread:501017 [wandb_init.py:init():988] updated telemetry
+2026-07-27 15:49:52,051 INFO    MainThread:501017 [wandb_init.py:init():1011] communicating run to backend with 90.0 second timeout
+2026-07-27 15:49:52,060 INFO    MainThread:501017 [wandb_init.py:init():1056] starting run threads in backend
+2026-07-27 15:49:52,454 INFO    MainThread:501017 [wandb_run.py:_console_start():2554] atexit reg
+2026-07-27 15:49:52,454 INFO    MainThread:501017 [wandb_run.py:_redirect():2403] redirect: wrap_raw
+2026-07-27 15:49:52,454 INFO    MainThread:501017 [wandb_run.py:_redirect():2472] Wrapping output streams.
+2026-07-27 15:49:52,454 INFO    MainThread:501017 [wandb_run.py:_redirect():2495] Redirects installed.
+2026-07-27 15:49:52,461 INFO    MainThread:501017 [wandb_init.py:init():1094] run started, returning control to user process
+2026-07-27 15:49:52,806 INFO    wandb-AsyncioManager-main:501017 [service_client.py:_forward_responses():134] Reached EOF.
+2026-07-27 15:49:52,806 INFO    wandb-AsyncioManager-main:501017 [mailbox.py:close():155] Closing mailbox, abandoning 0 handles.
