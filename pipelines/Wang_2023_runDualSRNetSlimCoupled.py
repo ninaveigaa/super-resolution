@@ -755,7 +755,7 @@ with strategy.scope():
                 
                 psnrC=tf.image.psnr(fakeC,Cd,2)
                 ssimC=tf.image.ssim(fakeC,Cd,2)
-                lossC=tf.reduce_mean(tf.abs(fakeC-Cd))
+                lossC=meanAbsoluteError(Cd,fakeC)
                 # set bit depth to 8 for SRxy
                 fakeC=(fakeC+1)*127.5
                 fakeC=tf.math.round(fakeC)
@@ -768,7 +768,7 @@ with strategy.scope():
                 fakeC_clean = generatorSRC(fakeC, training=False)
                 psnrCC=tf.image.psnr(fakeC_clean,C,2)
                 ssimCC=tf.image.ssim(fakeC_clean,C,2)
-                lossCC=tf.reduce_mean(tf.abs(fakeC_clean-C))
+                lossCC=meanAbsoluteError(C,fakeC_clean)
                 
                 B = np.asarray(B)
                 C = np.asarray(C)
