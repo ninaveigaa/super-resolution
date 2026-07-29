@@ -282,14 +282,19 @@ def cubic_interpolation(input, scale_factor=None, target_shape=None, output_path
     return TrackedArray(resized, source_path=out_path)
 
 
-def splitting(dataset, size: float, axis: int = -1, output_dir=None,
-              base_name: str = None) -> dict:
+def splitting(dataset, size: float, overlap: float = 0.0, axis: int = -1,
+              output_dir=None, base_name: str = None) -> dict:
     """Splits an array (or the array stored in a .npy file) into a
     training and a validation subset, by slicing contiguously along `axis`
     (the last axis by default).
 
     `size` is the FRACTION of the axis assigned to training (e.g. 0.8
     means 80% training / 20% validation).
+
+    `overlap` is the FRACTION of the axis length that train and
+    validation will share around the split point (e.g. 0.1 means 10%
+    of the axis is duplicated in both subsets). Use 0.0 (default) for
+    no overlap.
 
     Always saves both resulting arrays to disk -- as
     `{output_dir}/{base_name}_train.npy` and `{base_name}_validation.npy`
@@ -300,6 +305,9 @@ def splitting(dataset, size: float, axis: int = -1, output_dir=None,
 
     if not (0 < size < 1):
         raise ValueError(f"size (train fraction) must be between 0 and 1, got {size}.")
+
+    if not (0 <= overlap < 1):
+        raise ValueError(f"overlap must be between 0 (inclusive) and 1 (exclusive), got {overlap}.")
 
     if output_dir is None or base_name is None:
         if input_path is None:
@@ -313,10 +321,20 @@ def splitting(dataset, size: float, axis: int = -1, output_dir=None,
 
     n = volume.shape[axis]
     split_idx = int(round(n * size))
+    overlap_size = int(round(n * overlap / 2))
+
+    train_end = min(split_idx + overlap_size, n)
+    val_start = max(split_idx - overlap_size, 0)
+
+    if val_start >= train_end and overlap_size > 0:
+        raise ValueError(
+            f"overlap ({overlap}) is too large for size ({size}) and axis length ({n})."
+        )
+
     train_slices = [slice(None)] * volume.ndim
     val_slices = [slice(None)] * volume.ndim
-    train_slices[axis] = slice(0, split_idx)
-    val_slices[axis] = slice(split_idx, n)
+    train_slices[axis] = slice(0, train_end)
+    val_slices[axis] = slice(val_start, n)
 
     train_arr = volume[tuple(train_slices)]
     val_arr = volume[tuple(val_slices)]
