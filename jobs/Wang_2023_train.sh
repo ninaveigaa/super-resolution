@@ -13,8 +13,6 @@ module load TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1 virtualenv/20.23.1-GCCcore-
 cd /mimer/NOBACKUP/groups/kthmech/nvlmds/super-resolution/
 source envs/super-resolution-tensorflow/bin/activate
 
-mkdir -p logs metrics
-
 python pipelines/Wang_2023_runDualSRNetSlimCoupled.py \
     --epoch 500 \
     --itersPerEpoch 300 \

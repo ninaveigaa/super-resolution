@@ -8,8 +8,5 @@
 	path = submodules/DualEDSR_TS_2026
 	url = https://github.com/ninaveigaa/DualEDSR_TS_2026.git
 [submodule "EDSR-PyTorch"]
-	path = EDSR-PyTorch
+	path = submodules/EDSR-PyTorch
 	url = https://github.com/ninaveigaa/EDSR-PyTorch.git
-[submodule "Dual-EDSR_OG"]
-	path = Dual-EDSR_OG
-	url = https://github.com/wliangaz/Dual-EDSR.git
