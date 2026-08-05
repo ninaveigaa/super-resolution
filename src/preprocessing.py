@@ -24,8 +24,22 @@ Every transformation below:
 
     3. ALWAYS returns the transformed array itself (not the output path),
        so it can be passed directly into the next function in a chain.
+
+NEW IN THIS VERSION
+--------------------
+    - gaussian_blur:    blurs a volume (the first half of a realistic
+                         LR-degradation model: blur, then downsample).
+    - extract_patches:  cuts a large volume into many smaller patches,
+                         used to turn a single real HR volume into a large
+                         number of training samples.
+
+These two, combined with the existing `cubic_interpolation` (used for the
+downsampling half of the degradation model), are what
+`scripts/generate_synthetic_pairs.py` uses to manufacture synthetic
+LR/HR training pairs out of the real HR volume.
 """
 
+import itertools
 from pathlib import Path
 import numpy as np
 import tifffile
@@ -134,6 +148,21 @@ def _resolve_output_path(output_path, input_path, tag: str) -> Path:
             "default output path from)."
         )
     return input_path.with_name(f"{input_path.stem}_{tag}{input_path.suffix}")
+
+
+def _resolve_output_dir_and_base(output_dir, base_name, input_path):
+    """Shared helper for functions (like extract_patches, splitting) that
+    write MULTIPLE output files and therefore need a directory + a base
+    filename, rather than a single output_path."""
+    if output_dir is None or base_name is None:
+        if input_path is None:
+            raise ValueError(
+                "output_dir/base_name must be provided explicitly when "
+                "chaining from an in-memory array with no tracked source path."
+            )
+        output_dir = output_dir if output_dir is not None else input_path.parent
+        base_name = base_name if base_name is not None else input_path.stem
+    return Path(output_dir), base_name
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +311,120 @@ def cubic_interpolation(input, scale_factor=None, target_shape=None, output_path
     return TrackedArray(resized, source_path=out_path)
 
 
+def gaussian_blur(input, sigma, output_path=None) -> np.ndarray:
+    """Applies an isotropic (or per-axis) Gaussian blur to an array (or
+    the array stored in a .npy file), using scipy.ndimage.gaussian_filter.
+
+    `sigma` is the standard deviation of the Gaussian kernel, in voxels
+    (of the INPUT array). Pass a single number for an isotropic blur, or
+    a tuple with one sigma per axis for an anisotropic blur.
+
+    This exists as the "blur" half of a realistic LR-degradation model:
+    real micro-CT acquisitions at low resolution are not just a clean
+    downsample of the high-resolution structure -- the optics/detector
+    also blur it. Skipping this step and only downsampling (e.g. only
+    calling `cubic_interpolation` with a factor < 1) produces synthetic
+    LR volumes that are unrealistically sharp compared to a real scan,
+    which hurts how well a network trained on them generalizes to real
+    LR data.
+
+    `sigma` should be calibrated (e.g. by comparing a degraded HR patch
+    against the REAL registered LR patch of the same region) rather than
+    guessed -- see the note in generate_synthetic_pairs.py.
+
+    Always saves the result to disk (as .npy) and returns the blurred
+    array, so this can be chained into further transformations.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    volume, input_path = _resolve_input(input, required_ext=".npy")
+
+    blurred = gaussian_filter(volume.astype(np.float64), sigma=sigma)
+
+    # Preserve the original dtype/range: gaussian_filter on an integer
+    # array run through astype(float64) first will produce float64 values
+    # within the same range, but every step in this pipeline is expected
+    # to hand off the same dtype it received (uint8, typically).
+    if np.issubdtype(volume.dtype, np.integer):
+        info = np.iinfo(volume.dtype)
+        blurred = np.clip(blurred, info.min, info.max).astype(volume.dtype)
+    else:
+        blurred = blurred.astype(volume.dtype)
+
+    out_path = _resolve_output_path(output_path, input_path, "blurred")
+    _save_any(out_path, blurred)
+    return TrackedArray(blurred, source_path=out_path)
+
+
+def extract_patches(input, patch_size: tuple, stride: tuple = None,
+                     output_dir=None, base_name: str = None,
+                     min_std: float = None) -> list:
+    """Extracts patches of `patch_size` from an array (or the array
+    stored in a .npy file), sliding a window with steps of `stride`
+    (defaults to `patch_size`, i.e. non-overlapping patches). The last
+    patch along each axis is always shifted to end exactly at the array's
+    edge, so the full volume is covered even when it doesn't divide
+    evenly by `stride`.
+
+    `min_std`: if given, patches whose standard deviation is below this
+    threshold are skipped -- a cheap way to discard "empty" patches that
+    fall entirely in background/air, which would otherwise dilute
+    training with uninformative samples.
+
+    This exists to turn a SINGLE large real volume (e.g. one real HR
+    micro-CT scan) into MANY smaller training samples, which is what
+    makes it practical to train a CNN when only one or two real volumes
+    are available.
+
+    Always saves each patch to disk as
+    `{output_dir}/{base_name}_patch{i:05d}.npy` and returns the list of
+    patch arrays (as TrackedArray), so each can be chained further (e.g.
+    individually blurred + downsampled into a synthetic LR patch).
+    """
+    volume, input_path = _resolve_input(input, required_ext=".npy")
+
+    if len(patch_size) != volume.ndim:
+        raise ValueError(
+            f"patch_size has {len(patch_size)} dims, but volume has {volume.ndim} dims."
+        )
+    stride = stride if stride is not None else patch_size
+    if len(stride) != volume.ndim:
+        raise ValueError(f"stride has {len(stride)} dims, but volume has {volume.ndim} dims.")
+
+    output_dir, base_name = _resolve_output_dir_and_base(output_dir, base_name, input_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    axis_starts = []
+    for dim_size, p, s in zip(volume.shape, patch_size, stride):
+        if p > dim_size:
+            raise ValueError(f"patch_size {p} is larger than array dimension {dim_size}.")
+        last_start = dim_size - p
+        starts = list(range(0, last_start + 1, s))
+        if not starts or starts[-1] != last_start:
+            starts.append(last_start)  # make sure the volume's edge is always covered
+        axis_starts.append(starts)
+
+    patches = []
+    idx = 0
+    skipped = 0
+    for start_combo in itertools.product(*axis_starts):
+        sl = tuple(slice(s0, s0 + p) for s0, p in zip(start_combo, patch_size))
+        patch = volume[sl]
+
+        if min_std is not None and patch.std() < min_std:
+            skipped += 1
+            continue
+
+        patch_path = output_dir / f"{base_name}_patch{idx:05d}.npy"
+        _save_any(patch_path, patch)
+        patches.append(TrackedArray(patch, source_path=patch_path))
+        idx += 1
+
+    print(f"  extract_patches: {idx} patches saved to {output_dir}/"
+          + (f" ({skipped} skipped, std < {min_std})" if min_std is not None else ""))
+    return patches
+
+
 def splitting(dataset, size: float, overlap: float = 0.0, axis: int = -1,
               output_dir=None, base_name: str = None) -> dict:
     """Splits an array (or the array stored in a .npy file) into a
@@ -309,15 +452,7 @@ def splitting(dataset, size: float, overlap: float = 0.0, axis: int = -1,
     if not (0 <= overlap < 1):
         raise ValueError(f"overlap must be between 0 (inclusive) and 1 (exclusive), got {overlap}.")
 
-    if output_dir is None or base_name is None:
-        if input_path is None:
-            raise ValueError(
-                "output_dir/base_name must be provided explicitly when "
-                "chaining from an in-memory array with no tracked source path."
-            )
-        output_dir = output_dir if output_dir is not None else input_path.parent
-        base_name = base_name if base_name is not None else input_path.stem
-    output_dir = Path(output_dir)
+    output_dir, base_name = _resolve_output_dir_and_base(output_dir, base_name, input_path)
 
     n = volume.shape[axis]
     split_idx = int(round(n * size))
