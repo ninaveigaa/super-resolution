@@ -7,3 +7,5 @@ different pipelines
 from . import preprocessing
 
 from . import metrics
+
+from . import dataset
